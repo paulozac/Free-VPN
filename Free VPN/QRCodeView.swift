@@ -33,8 +33,11 @@ struct QRCodeView: View {
                 .multilineTextAlignment(.center)
 
             Text(url)
-                .font(.system(.title3, design: .monospaced))
+                .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.blue)
+                .lineLimit(2)
+                .minimumScaleFactor(0.5)
+                .multilineTextAlignment(.center)
         }
         .padding(40)
     }

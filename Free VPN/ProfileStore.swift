@@ -81,6 +81,12 @@ final class ProfileStore {
         save()
     }
 
+    func renameProfile(_ profile: SavedProfile, to newName: String) {
+        guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
+        profiles[index].name = newName
+        save()
+    }
+
     // MARK: - Persistence
 
     private func save() {

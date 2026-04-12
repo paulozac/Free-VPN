@@ -7,259 +7,258 @@
 
 import SwiftUI
 
+// MARK: - Theme
+
+private enum Theme {
+    static let accent = Color(red: 0.13, green: 0.69, blue: 0.34)
+}
+
+// MARK: - Main View
+
 struct ContentView: View {
     @State private var vpnManager = VPNManager()
     @State private var profileStore = ProfileStore()
     @State private var profileServer = ProfileServer()
     @State private var showingUpload = false
-    @State private var showingProfiles = false
+    @State private var renamingProfile: SavedProfile?
+    @State private var renameText = ""
+    @State private var deletingProfile: SavedProfile?
+    @AppStorage("splitTunnelEnabled") private var splitTunnelEnabled = true
 
     var body: some View {
-        VStack(spacing: 50) {
-            Spacer()
+        NavigationStack {
+            HStack(alignment: .top, spacing: 0) {
+                // Left: Status + Controls
+                VStack(spacing: 20) {
+                    Image(systemName: statusIconName)
+                        .font(.system(size: 80))
+                        .foregroundStyle(statusIconColor)
+                        .symbolEffect(.pulse, isActive: vpnManager.connectionState == .connecting || vpnManager.connectionState == .disconnecting || vpnManager.connectionState == .reasserting)
+                        .padding(.top, 40)
 
-            statusIcon
-            statusLabel
-            connectionDetails
-            activeProfileLabel
+                    Text(vpnManager.connectionState.rawValue)
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
 
-            Spacer()
-
-            connectButton
-
-            HStack(spacing: 40) {
-                if !profileStore.profiles.isEmpty {
-                    Button {
-                        showingProfiles = true
-                    } label: {
-                        Label("Profiles (\(profileStore.profiles.count))", systemImage: "list.bullet")
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                Button {
-                    showingUpload = true
-                    profileServer.onProfileReceived = { name, config in
-                        let error = profileStore.addProfile(name: name, configString: config)
-                        if error == nil, let profile = profileStore.profiles.last {
-                            profileStore.selectProfile(profile)
-                            applySelectedProfile()
+                    if vpnManager.connectionState == .connected {
+                        VStack(spacing: 4) {
+                            if let date = vpnManager.connectedDate {
+                                Text("Connected \(date, style: .relative) ago")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let ip = vpnManager.serverIP {
+                                Text("IP: \(ip)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let location = vpnManager.serverCity {
+                                Text(location)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
-                    profileServer.start()
-                } label: {
-                    Label("Upload Profile", systemImage: "arrow.up.circle")
-                }
-                .buttonStyle(.bordered)
-            }
 
-            Spacer()
+                    Spacer()
+
+                    Button {
+                        vpnManager.toggleConnection()
+                    } label: {
+                        Text(connectButtonTitle)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(vpnManager.connectionState == .disconnecting)
+
+                    Toggle("Split Tunnel", isOn: $splitTunnelEnabled)
+                        .onChange(of: splitTunnelEnabled) {
+                            if vpnManager.isConfigured {
+                                reconfigureWithSplitTunnel()
+                            }
+                        }
+
+                    Button {
+                        profileServer.onProfileReceived = { name, config in
+                            let error = profileStore.addProfile(name: name, configString: config)
+                            if error == nil, let profile = profileStore.profiles.last {
+                                profileStore.selectProfile(profile)
+                                applySelectedProfile()
+                                showingUpload = false
+                                profileServer.stop()
+                            }
+                        }
+                        profileServer.start()
+                        showingUpload = true
+                    } label: {
+                        Label("Upload Profile", systemImage: "plus.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+
+                    Spacer().frame(height: 20)
+                }
+                .focusSection()
+                .frame(width: UIScreen.main.bounds.width * 0.4)
+                .padding(.horizontal, 40)
+
+                // Right: Profile list
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Profiles")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 40)
+
+                    Text("Long press a profile to rename or delete")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+
+                    ScrollView {
+                        VStack(spacing: 2) {
+                            ForEach(profileStore.profiles) { profile in
+                                Button {
+                                    profileStore.selectProfile(profile)
+                                    applySelectedProfile()
+                                } label: {
+                                    HStack {
+                                        Image(systemName: profile.id == profileStore.selectedProfileID ? "checkmark.circle.fill" : "circle")
+                                            .foregroundStyle(profile.id == profileStore.selectedProfileID ? Theme.accent : .secondary)
+
+                                        VStack(alignment: .leading) {
+                                            Text(profile.name)
+                                                .font(.body)
+                                            if let endpoint = profile.endpoint {
+                                                Text(endpoint)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+
+                                        Spacer()
+
+                                        if profile.id == profileStore.selectedProfileID {
+                                            Text("ACTIVE")
+                                                .font(.caption2)
+                                                .fontWeight(.bold)
+                                                .foregroundStyle(Theme.accent)
+                                        }
+                                    }
+                                    .padding(.horizontal)
+                                }
+                                .contextMenu {
+                                    Button {
+                                        renameText = profile.name
+                                        renamingProfile = profile
+                                    } label: {
+                                        Label("Rename", systemImage: "pencil")
+                                    }
+                                    Button(role: .destructive) {
+                                        deletingProfile = profile
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .focusSection()
+                .frame(width: UIScreen.main.bounds.width * 0.5)
+                .padding(.trailing, 40)
+            }
+            .alert("Error", isPresented: .init(
+                get: { vpnManager.errorMessage != nil },
+                set: { if !$0 { vpnManager.errorMessage = nil } }
+            )) {
+                Button("OK") { vpnManager.errorMessage = nil }
+            } message: {
+                Text(vpnManager.errorMessage ?? "")
+            }
+            .alert("Rename Profile", isPresented: .init(
+                get: { renamingProfile != nil },
+                set: { if !$0 { renamingProfile = nil } }
+            )) {
+                TextField("Profile name", text: $renameText)
+                Button("Save") {
+                    if let profile = renamingProfile {
+                        profileStore.renameProfile(profile, to: renameText)
+                    }
+                    renamingProfile = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    renamingProfile = nil
+                }
+            }
+            .alert("Delete Profile", isPresented: .init(
+                get: { deletingProfile != nil },
+                set: { if !$0 { deletingProfile = nil } }
+            )) {
+                Button("Delete", role: .destructive) {
+                    if let profile = deletingProfile {
+                        profileStore.removeProfile(profile)
+                        applySelectedProfile()
+                    }
+                    deletingProfile = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    deletingProfile = nil
+                }
+            } message: {
+                Text("Are you sure you want to delete \"\(deletingProfile?.name ?? "")\"?")
+            }
+            .sheet(isPresented: $showingUpload, onDismiss: {
+                profileServer.stop()
+            }) {
+                NavigationStack {
+                    if let url = profileServer.localURL {
+                        QRCodeView(url: url)
+                    } else {
+                        ProgressView("Starting server...")
+                    }
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             applySelectedProfile()
         }
-        .alert("Error", isPresented: .init(
-            get: { vpnManager.errorMessage != nil },
-            set: { if !$0 { vpnManager.errorMessage = nil } }
-        )) {
-            Button("OK") {
-                vpnManager.errorMessage = nil
-            }
-        } message: {
-            Text(vpnManager.errorMessage ?? "")
-        }
-        .sheet(isPresented: $showingUpload, onDismiss: {
-            profileServer.stop()
-        }) {
-            uploadSheet
-        }
-        .sheet(isPresented: $showingProfiles) {
-            profileListSheet
-        }
     }
 
-    // MARK: - Apply Profile
+    // MARK: - Helpers
 
     private func applySelectedProfile() {
         guard let profile = profileStore.selectedProfile else { return }
         Task {
-            await vpnManager.configure(with: profile.configString)
+            await vpnManager.configure(with: profile.configString, splitTunnel: splitTunnelEnabled)
         }
     }
 
-    // MARK: - Upload Sheet
-
-    @ViewBuilder
-    private var uploadSheet: some View {
-        NavigationStack {
-            VStack {
-                if let url = profileServer.localURL {
-                    QRCodeView(url: url)
-                } else {
-                    ProgressView("Starting server...")
-                        .padding()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        showingUpload = false
-                    }
-                }
-            }
+    private func reconfigureWithSplitTunnel() {
+        guard let profile = profileStore.selectedProfile else { return }
+        Task {
+            await vpnManager.reconfigure(with: profile.configString, splitTunnel: splitTunnelEnabled)
         }
     }
 
-    // MARK: - Profile List Sheet
-
-    @ViewBuilder
-    private var profileListSheet: some View {
-        NavigationStack {
-            List {
-                ForEach(profileStore.profiles) { profile in
-                    Button {
-                        profileStore.selectProfile(profile)
-                        applySelectedProfile()
-                        showingProfiles = false
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(profile.name)
-                                    .font(.headline)
-                                if let endpoint = profile.endpoint {
-                                    Text(endpoint)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if let address = profile.address {
-                                    Text(address)
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                            Spacer()
-                            if profile.id == profileStore.selectedProfileID {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                                    .font(.title3)
-                            }
-                        }
-                    }
-                }
-                .onDelete { indexSet in
-                    for index in indexSet {
-                        profileStore.removeProfile(profileStore.profiles[index])
-                    }
-                }
-            }
-            .navigationTitle("VPN Profiles")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        showingProfiles = false
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Subviews
-
-    @ViewBuilder
-    private var statusIcon: some View {
-        let (iconName, iconColor) = statusIconInfo
-        Image(systemName: iconName)
-            .font(.system(size: 120))
-            .foregroundStyle(iconColor)
-            .symbolEffect(.pulse, isActive: isPulsing)
-    }
-
-    private var statusIconInfo: (String, Color) {
+    private var statusIconName: String {
         switch vpnManager.connectionState {
-        case .connected:
-            return ("lock.shield.fill", .green)
-        case .connecting, .reasserting:
-            return ("shield.fill", .orange)
-        case .disconnecting:
-            return ("shield.fill", .orange)
-        case .disconnected:
-            return ("shield.slash.fill", .secondary)
-        case .invalid:
-            return ("shield.slash.fill", .secondary)
+        case .connected: "lock.shield.fill"
+        case .connecting, .reasserting, .disconnecting: "shield.fill"
+        case .disconnected, .invalid: "shield.slash.fill"
         }
     }
 
-    private var isPulsing: Bool {
+    private var statusIconColor: Color {
         switch vpnManager.connectionState {
-        case .connecting, .disconnecting, .reasserting:
-            return true
-        default:
-            return false
+        case .connected: Theme.accent
+        case .connecting, .reasserting, .disconnecting: .orange
+        case .disconnected, .invalid: .secondary
         }
-    }
-
-    private var statusLabel: some View {
-        Text(vpnManager.connectionState.rawValue)
-            .font(.title)
-            .foregroundStyle(.secondary)
-    }
-
-    @ViewBuilder
-    private var connectionDetails: some View {
-        if vpnManager.connectionState == .connected, let date = vpnManager.connectedDate {
-            Text("Connected since \(date, style: .relative) ago")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-    }
-
-    @ViewBuilder
-    private var activeProfileLabel: some View {
-        if let profile = profileStore.selectedProfile {
-            Text(profile.name)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-                .background(.ultraThinMaterial, in: Capsule())
-        }
-    }
-
-    private var connectButton: some View {
-        Button {
-            vpnManager.toggleConnection()
-        } label: {
-            Text(connectButtonTitle)
-                .font(.title2)
-                .fontWeight(.semibold)
-                .frame(width: 400)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(connectButtonTint)
-        .disabled(vpnManager.connectionState == .disconnecting)
     }
 
     private var connectButtonTitle: String {
         switch vpnManager.connectionState {
-        case .disconnected, .invalid:
-            return "Connect"
-        case .connecting:
-            return "Cancel"
-        case .connected, .reasserting:
-            return "Disconnect"
-        case .disconnecting:
-            return "Disconnecting..."
-        }
-    }
-
-    private var connectButtonTint: Color {
-        switch vpnManager.connectionState {
-        case .connected, .connecting, .reasserting:
-            return .red
-        default:
-            return .accentColor
+        case .disconnected, .invalid: "Connect"
+        case .connecting: "Cancel"
+        case .connected, .reasserting: "Disconnect"
+        case .disconnecting: "Disconnecting..."
         }
     }
 }

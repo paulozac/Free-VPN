@@ -24,20 +24,20 @@ final class VPNManager {
 
     private(set) var connectionState: ConnectionState = .invalid
     private(set) var connectedDate: Date?
+    private(set) var serverAddress: String?
+    private(set) var serverCity: String?
+    private(set) var serverIP: String?
     var errorMessage: String?
 
     private let log = Logger(subsystem: "com.zacvpn.zacvpn", category: "VPNManager")
     private var tunnelManager: NETunnelProviderManager?
     private var statusObserver: NSObjectProtocol?
 
-    /// The bundle identifier of the Packet Tunnel Provider extension.
-    /// Update this to match your Network Extension target's bundle ID.
     private let tunnelBundleIdentifier = "com.zacvpn.zacvpn.PacketTunnel"
 
     init() {
         Task {
             await loadExistingManager()
-            // If no existing config, load the bundled default profile
             if tunnelManager == nil {
                 await loadBundledProfile()
             }
@@ -46,7 +46,7 @@ final class VPNManager {
 
     // MARK: - Public API
 
-    func configure(with configString: String) async {
+    func configure(with configString: String, splitTunnel: Bool = true) async {
         errorMessage = nil
         log.info("Configuring VPN with config (\(configString.count) chars)")
 
@@ -60,7 +60,12 @@ final class VPNManager {
             return
         }
 
-        await saveTunnelConfiguration(config)
+        // Store endpoint for display
+        if let endpoint = config.peers.first?.endpoint {
+            serverAddress = endpoint
+        }
+
+        await saveTunnelConfiguration(config, splitTunnel: splitTunnel)
     }
 
     func connect() {
@@ -83,7 +88,6 @@ final class VPNManager {
     func toggleConnection() {
         switch connectionState {
         case .invalid:
-            // Profile not loaded yet, load it then connect
             Task {
                 await loadBundledProfile()
                 connect()
@@ -97,6 +101,19 @@ final class VPNManager {
         }
     }
 
+    func reconfigure(with configString: String, splitTunnel: Bool) async {
+        let wasConnected = connectionState == .connected || connectionState == .connecting || connectionState == .reasserting
+        if wasConnected {
+            disconnect()
+            // Wait briefly for disconnect to register
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        await configure(with: configString, splitTunnel: splitTunnel)
+        if wasConnected {
+            connect()
+        }
+    }
+
     var isConfigured: Bool {
         tunnelManager != nil && connectionState != .invalid
     }
@@ -106,27 +123,59 @@ final class VPNManager {
     private func loadExistingManager() async {
         do {
             let managers = try await NETunnelProviderManager.loadAllFromPreferences()
-            if let existing = managers.first {
-                tunnelManager = existing
+            log.info("Found \(managers.count) existing VPN manager(s)")
+
+            for manager in managers {
+                if let proto = manager.protocolConfiguration as? NETunnelProviderProtocol {
+                    log.info("Existing manager bundle ID: \(proto.providerBundleIdentifier ?? "nil")")
+
+                    if proto.providerBundleIdentifier != tunnelBundleIdentifier {
+                        log.info("Removing stale VPN config with old bundle ID")
+                        try? await manager.removeFromPreferences()
+                        continue
+                    }
+
+                    // Restore server address from saved config
+                    serverAddress = proto.serverAddress
+                }
+                tunnelManager = manager
                 observeStatus()
                 updateConnectionState()
+                break
             }
         } catch {
+            log.error("Failed to load VPN configuration: \(error.localizedDescription)")
             errorMessage = "Failed to load VPN configuration: \(error.localizedDescription)"
         }
     }
 
-    private func saveTunnelConfiguration(_ config: WireGuardConfig) async {
+    private func saveTunnelConfiguration(_ config: WireGuardConfig, splitTunnel: Bool) async {
         let manager = tunnelManager ?? NETunnelProviderManager()
 
         let protocolConfig = NETunnelProviderProtocol()
         protocolConfig.providerBundleIdentifier = tunnelBundleIdentifier
         protocolConfig.serverAddress = config.peers.first?.endpoint ?? "Unknown"
 
-        // Store the full WireGuard config in providerConfiguration so the
-        // Packet Tunnel Provider can read it at connection time.
+        // Build the config string, modifying AllowedIPs for split tunnel
+        var configToSave = config
+        if splitTunnel {
+            // Exclude local networks from VPN routing
+            for i in configToSave.peers.indices {
+                let allowedIPs = configToSave.peers[i].allowedIPs
+                if allowedIPs.contains("0.0.0.0/0") {
+                    configToSave.peers[i].allowedIPs = [
+                        "0.0.0.0/1", "128.0.0.0/1"  // Route all except local
+                    ]
+                    // Keep IPv6 if present
+                    if allowedIPs.contains("::/0") {
+                        configToSave.peers[i].allowedIPs.append("::/0")
+                    }
+                }
+            }
+        }
+
         protocolConfig.providerConfiguration = [
-            "wgQuickConfig": config.toWgQuickConfig()
+            "wgQuickConfig": configToSave.toWgQuickConfig()
         ]
 
         manager.protocolConfiguration = protocolConfig
@@ -136,24 +185,21 @@ final class VPNManager {
         do {
             try await manager.saveToPreferences()
             log.info("VPN configuration saved to preferences")
-            // Reload after save to pick up system-assigned properties
             try await manager.loadFromPreferences()
             tunnelManager = manager
             observeStatus()
             updateConnectionState()
             log.info("VPN configured successfully, state: \(self.connectionState.rawValue)")
             errorMessage = nil
-        } catch {
-            log.error("Failed to save VPN config: \(error.localizedDescription)")
-            errorMessage = "Failed to save VPN configuration: \(error.localizedDescription)"
+        } catch let nsError as NSError {
+            log.error("Failed to save VPN config: domain=\(nsError.domain) code=\(nsError.code) \(nsError.localizedDescription)")
+            errorMessage = "Failed to save VPN: \(nsError.localizedDescription) (code \(nsError.code))"
         }
     }
 
-    /// Loads the bundled vpntest.conf from the app bundle as the default profile.
     private func loadBundledProfile() async {
         log.info("Loading bundled VPN profile...")
 
-        // Try multiple locations since bundle layout may vary
         let url = Bundle.main.url(forResource: "vpntest", withExtension: "conf", subdirectory: "profiles")
             ?? Bundle.main.url(forResource: "vpntest", withExtension: "conf")
 
@@ -164,13 +210,11 @@ final class VPNManager {
         }
 
         log.warning("Bundled profile not found in bundle, using embedded default config")
-        // Fallback: use the embedded default config directly
         await configure(with: Self.defaultConfig)
     }
 
-    // No leading whitespace — must be flush left for the WireGuard parser
     private static let defaultConfig = """
-[Interface]r
+[Interface]
 Address = 10.0.0.7/24
 PrivateKey = kIdmDoBYI3QZqOHCrtn8Y9si1zSxxN2MJy4KAgaWSHA=
 DNS = 64.6.64.6,10.0.0.1
@@ -190,8 +234,40 @@ PublicKey = wwBMNHjRkr6MUhrTIo/Fha2MMiruofEyZ2Yysfbt9Ho=
             tunnelManager = nil
             connectionState = .invalid
             connectedDate = nil
+            serverAddress = nil
+            serverCity = nil
         } catch {
             errorMessage = "Failed to remove VPN configuration: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Server City Lookup
+
+    private func lookupServerLocation() {
+        Task.detached {
+            // Use HTTPS endpoint (ip-api HTTP is blocked by ATS on tvOS)
+            guard let url = URL(string: "https://ipinfo.io/json") else { return }
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let ip = json["ip"] as? String
+                    let city = json["city"] as? String
+                    let region = json["region"] as? String
+                    let country = json["country"] as? String
+
+                    var locationParts: [String] = []
+                    if let city, !city.isEmpty { locationParts.append(city) }
+                    if let region, !region.isEmpty { locationParts.append(region) }
+                    if let country, !country.isEmpty { locationParts.append(country) }
+
+                    await MainActor.run {
+                        self.serverIP = ip
+                        self.serverCity = locationParts.joined(separator: ", ")
+                    }
+                }
+            } catch {
+                // Location lookup is best-effort
+            }
         }
     }
 
@@ -228,11 +304,14 @@ PublicKey = wwBMNHjRkr6MUhrTIo/Fha2MMiruofEyZ2Yysfbt9Ho=
         case .disconnected:
             connectionState = .disconnected
             connectedDate = nil
+            serverCity = nil
+            serverIP = nil
         case .connecting:
             connectionState = .connecting
         case .connected:
             connectionState = .connected
             connectedDate = tunnelManager?.connection.connectedDate
+            lookupServerLocation()
         case .reasserting:
             connectionState = .reasserting
         case .disconnecting:
