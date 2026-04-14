@@ -46,26 +46,16 @@ final class VPNManager {
 
     // MARK: - Public API
 
-    func configure(with configString: String, splitTunnel: Bool = true) async {
+    func configure(with configString: String, protocolType: VPNProtocolType = .wireGuard, splitTunnel: Bool = true) async {
         errorMessage = nil
-        log.info("Configuring VPN with config (\(configString.count) chars)")
+        log.info("Configuring VPN (\(protocolType.displayName)) with config (\(configString.count) chars)")
 
-        let config: WireGuardConfig
-        do {
-            config = try WireGuardConfig.parse(from: configString)
-            log.info("Parsed config: interface address=\(config.interface.address), peers=\(config.peers.count)")
-        } catch {
-            log.error("Failed to parse config: \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
-            return
+        switch protocolType {
+        case .wireGuard:
+            await configureWireGuard(configString: configString, splitTunnel: splitTunnel)
+        case .openVPN:
+            await configureOpenVPN(configString: configString)
         }
-
-        // Store endpoint for display
-        if let endpoint = config.peers.first?.endpoint {
-            serverAddress = endpoint
-        }
-
-        await saveTunnelConfiguration(config, splitTunnel: splitTunnel)
     }
 
     func connect() {
@@ -101,14 +91,13 @@ final class VPNManager {
         }
     }
 
-    func reconfigure(with configString: String, splitTunnel: Bool) async {
+    func reconfigure(with configString: String, protocolType: VPNProtocolType = .wireGuard, splitTunnel: Bool) async {
         let wasConnected = connectionState == .connected || connectionState == .connecting || connectionState == .reasserting
         if wasConnected {
             disconnect()
-            // Wait briefly for disconnect to register
             try? await Task.sleep(for: .milliseconds(500))
         }
-        await configure(with: configString, splitTunnel: splitTunnel)
+        await configure(with: configString, protocolType: protocolType, splitTunnel: splitTunnel)
         if wasConnected {
             connect()
         }
@@ -116,6 +105,67 @@ final class VPNManager {
 
     var isConfigured: Bool {
         tunnelManager != nil && connectionState != .invalid
+    }
+
+    // MARK: - WireGuard Configuration
+
+    private func configureWireGuard(configString: String, splitTunnel: Bool) async {
+        let config: WireGuardConfig
+        do {
+            config = try WireGuardConfig.parse(from: configString)
+            log.info("Parsed WireGuard config: interface address=\(config.interface.address), peers=\(config.peers.count)")
+        } catch {
+            log.error("Failed to parse WireGuard config: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            return
+        }
+
+        if let endpoint = config.peers.first?.endpoint {
+            serverAddress = endpoint
+        }
+
+        // Build the config string, modifying AllowedIPs for split tunnel
+        var configToSave = config
+        if splitTunnel {
+            for i in configToSave.peers.indices {
+                let allowedIPs = configToSave.peers[i].allowedIPs
+                if allowedIPs.contains("0.0.0.0/0") {
+                    configToSave.peers[i].allowedIPs = [
+                        "0.0.0.0/1", "128.0.0.0/1"
+                    ]
+                    if allowedIPs.contains("::/0") {
+                        configToSave.peers[i].allowedIPs.append("::/0")
+                    }
+                }
+            }
+        }
+
+        let providerConfig: [String: Any] = [
+            "protocolType": VPNProtocolType.wireGuard.rawValue,
+            "wgQuickConfig": configToSave.toWgQuickConfig()
+        ]
+
+        await saveTunnelConfiguration(
+            serverAddress: config.peers.first?.endpoint ?? "Unknown",
+            providerConfig: providerConfig
+        )
+    }
+
+    // MARK: - OpenVPN Configuration
+
+    private func configureOpenVPN(configString: String) async {
+        let endpoint = OpenVPNConfig.extractEndpoint(from: configString)
+        serverAddress = endpoint
+
+        let providerConfig: [String: Any] = [
+            "protocolType": VPNProtocolType.openVPN.rawValue,
+            "ovpnConfig": configString
+        ]
+
+        await saveTunnelConfiguration(
+            serverAddress: endpoint ?? "Unknown",
+            providerConfig: providerConfig
+        )
     }
 
     // MARK: - Tunnel Manager Lifecycle
@@ -135,7 +185,6 @@ final class VPNManager {
                         continue
                     }
 
-                    // Restore server address from saved config
                     serverAddress = proto.serverAddress
                 }
                 tunnelManager = manager
@@ -149,34 +198,13 @@ final class VPNManager {
         }
     }
 
-    private func saveTunnelConfiguration(_ config: WireGuardConfig, splitTunnel: Bool) async {
+    private func saveTunnelConfiguration(serverAddress: String, providerConfig: [String: Any]) async {
         let manager = tunnelManager ?? NETunnelProviderManager()
 
         let protocolConfig = NETunnelProviderProtocol()
         protocolConfig.providerBundleIdentifier = tunnelBundleIdentifier
-        protocolConfig.serverAddress = config.peers.first?.endpoint ?? "Unknown"
-
-        // Build the config string, modifying AllowedIPs for split tunnel
-        var configToSave = config
-        if splitTunnel {
-            // Exclude local networks from VPN routing
-            for i in configToSave.peers.indices {
-                let allowedIPs = configToSave.peers[i].allowedIPs
-                if allowedIPs.contains("0.0.0.0/0") {
-                    configToSave.peers[i].allowedIPs = [
-                        "0.0.0.0/1", "128.0.0.0/1"  // Route all except local
-                    ]
-                    // Keep IPv6 if present
-                    if allowedIPs.contains("::/0") {
-                        configToSave.peers[i].allowedIPs.append("::/0")
-                    }
-                }
-            }
-        }
-
-        protocolConfig.providerConfiguration = [
-            "wgQuickConfig": configToSave.toWgQuickConfig()
-        ]
+        protocolConfig.serverAddress = serverAddress
+        protocolConfig.providerConfiguration = providerConfig
 
         manager.protocolConfiguration = protocolConfig
         manager.localizedDescription = "ZacVPN"
@@ -245,7 +273,6 @@ PublicKey = wwBMNHjRkr6MUhrTIo/Fha2MMiruofEyZ2Yysfbt9Ho=
 
     private func lookupServerLocation() {
         Task.detached {
-            // Use HTTPS endpoint (ip-api HTTP is blocked by ATS on tvOS)
             guard let url = URL(string: "https://ipinfo.io/json") else { return }
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)

@@ -10,7 +10,7 @@ import Network
 import os.log
 
 /// A lightweight HTTP server that runs on the Apple TV's local network,
-/// serving a web page where users can upload a WireGuard .conf profile.
+/// serving a web page where users can upload a WireGuard or OpenVPN profile.
 @MainActor
 @Observable
 final class ProfileServer {
@@ -140,18 +140,33 @@ final class ProfileServer {
         let configValue = (params["config"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let profileName = (params["name"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Validate the config
-        if let validationError = WireGuardConfig.validate(configValue) {
-            sendErrorPage(message: validationError, on: connection)
+        if configValue.isEmpty {
+            sendErrorPage(message: "No configuration provided.", on: connection)
             return
         }
 
+        // Detect protocol type and validate accordingly
+        let detectedProtocol = VPNProtocolType.detect(from: configValue)
+
+        switch detectedProtocol {
+        case .wireGuard:
+            if let validationError = WireGuardConfig.validate(configValue) {
+                sendErrorPage(message: validationError, on: connection)
+                return
+            }
+        case .openVPN:
+            if let validationError = OpenVPNConfig.validate(configValue) {
+                sendErrorPage(message: validationError, on: connection)
+                return
+            }
+        }
+
         Task { @MainActor in
-            self.log.info("Received valid profile '\(profileName)' via HTTP upload (\(configValue.count) chars)")
+            self.log.info("Received valid \(detectedProtocol.displayName) profile '\(profileName)' via HTTP upload (\(configValue.count) chars)")
             self.onProfileReceived?(profileName, configValue)
         }
 
-        sendSuccessPage(profileName: profileName.isEmpty ? "Unnamed" : profileName, on: connection)
+        sendSuccessPage(profileName: profileName.isEmpty ? "Unnamed" : profileName, protocolName: detectedProtocol.displayName, on: connection)
     }
 
     // MARK: - Form Parsing
@@ -172,11 +187,11 @@ final class ProfileServer {
 
     // MARK: - Response Pages
 
-    private nonisolated func sendSuccessPage(profileName: String, on connection: NWConnection) {
+    private nonisolated func sendSuccessPage(profileName: String, protocolName: String, on connection: NWConnection) {
         let html = Self.responsePage(
             icon: "&#10003;",
             iconColor: "#34c759",
-            title: "Profile Uploaded",
+            title: "\(protocolName) Profile Uploaded",
             message: "\"\(profileName.replacingOccurrences(of: "\"", with: "&quot;"))\" has been added to your Apple TV. You can select it from the profile list.",
             showBackLink: true
         )
@@ -249,6 +264,9 @@ final class ProfileServer {
     .file-label:hover{border-color:#0a84ff;color:#0a84ff}
     .file-label.active{border-color:#34c759;color:#34c759;border-style:solid}
     .file-name{color:#0a84ff;margin-top:8px;font-size:13px;text-align:center;min-height:20px}
+    .detected{text-align:center;margin-top:8px;font-size:13px;font-weight:600;min-height:20px}
+    .detected.wg{color:#34c759}
+    .detected.ovpn{color:#ff9500}
     button{width:100%;padding:14px;background:#0a84ff;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;margin-top:20px;transition:background 0.2s}
     button:hover{background:#0070e0}
     button:disabled{background:#333;color:#666;cursor:not-allowed}
@@ -257,46 +275,53 @@ final class ProfileServer {
     </style></head><body>
     <div class="card">
     <h1>ZacVPN</h1>
-    <p class="sub">Upload a WireGuard profile to your Apple TV</p>
+    <p class="sub">Upload a WireGuard or OpenVPN profile to your Apple TV</p>
     <div class="error" id="error"></div>
     <form method="POST" id="form">
     <label class="field" for="name">Profile Name (optional)</label>
     <input type="text" name="name" id="name" placeholder="e.g. Home Server, US East, Work VPN">
     <label class="field" for="config">Configuration</label>
-    <textarea name="config" id="config" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = 10.0.0.2/24&#10;DNS = 1.1.1.1&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = vpn.example.com:51820&#10;AllowedIPs = 0.0.0.0/0"></textarea>
+    <textarea name="config" id="config" placeholder="Paste WireGuard (.conf) or OpenVPN (.ovpn) config here..."></textarea>
+    <div class="detected" id="detected"></div>
     <div class="or">&#8212; or &#8212;</div>
-    <label class="file-label" for="file" id="fileLabel">&#128193; Choose .conf file</label>
-    <input type="file" id="file" accept=".conf,.txt">
+    <label class="file-label" for="file" id="fileLabel">&#128193; Choose .conf or .ovpn file</label>
+    <input type="file" id="file" accept=".conf,.ovpn,.txt">
     <div class="file-name" id="fileName"></div>
     <button type="submit" id="btn" disabled>Upload Profile</button>
     </form>
-    <p class="hint">Your profile must contain an [Interface] section with PrivateKey and Address,<br>and at least one [Peer] section with a PublicKey.</p>
+    <p class="hint">Supports WireGuard (.conf) and OpenVPN (.ovpn) profiles.</p>
     </div>
     <script>
     const config=document.getElementById('config'),file=document.getElementById('file'),
     btn=document.getElementById('btn'),fileName=document.getElementById('fileName'),
     nameField=document.getElementById('name'),errorDiv=document.getElementById('error'),
-    fileLabel=document.getElementById('fileLabel'),form=document.getElementById('form');
+    fileLabel=document.getElementById('fileLabel'),form=document.getElementById('form'),
+    detected=document.getElementById('detected');
+
+    function detectProtocol(c){
+      const l=c.toLowerCase();
+      if(l.includes('[interface]')&&l.includes('[peer]')&&l.includes('privatekey'))return'wireguard';
+      if(l.includes('remote ')||l.includes('<ca>')||/^client\\s*$/m.test(l))return'openvpn';
+      return null;
+    }
 
     function validate(){
       const c=config.value.trim();
       errorDiv.style.display='none';
+      detected.textContent='';detected.className='detected';
       if(!c){btn.disabled=true;return}
-      // Basic client-side checks
-      if(!c.match(/\\[Interface\\]/i)){
-        showError("Missing [Interface] section. This doesn't look like a WireGuard config.");
-        btn.disabled=true;return;
-      }
-      if(!c.match(/PrivateKey\\s*=/i)){
-        showError("Missing PrivateKey in [Interface] section.");
-        btn.disabled=true;return;
-      }
-      if(!c.match(/\\[Peer\\]/i)){
-        showError("Missing [Peer] section. At least one peer is required.");
-        btn.disabled=true;return;
-      }
-      if(!c.match(/PublicKey\\s*=/i)){
-        showError("Missing PublicKey in [Peer] section.");
+
+      const proto=detectProtocol(c);
+      if(proto==='wireguard'){
+        detected.textContent='Detected: WireGuard';detected.className='detected wg';
+        if(!c.match(/PrivateKey\\s*=/i)){showError("Missing PrivateKey in [Interface] section.");btn.disabled=true;return}
+        if(!c.match(/PublicKey\\s*=/i)){showError("Missing PublicKey in [Peer] section.");btn.disabled=true;return}
+      }else if(proto==='openvpn'){
+        detected.textContent='Detected: OpenVPN';detected.className='detected ovpn';
+        if(!c.match(/remote\\s+/im)){showError("Missing 'remote' directive.");btn.disabled=true;return}
+        if(!c.includes('<ca>')&&!/^ca\\s+/m.test(c)){showError("Missing CA certificate (<ca> block or ca directive).");btn.disabled=true;return}
+      }else{
+        showError("Could not detect config type. Make sure this is a valid WireGuard or OpenVPN config.");
         btn.disabled=true;return;
       }
       errorDiv.style.display='none';
@@ -310,15 +335,14 @@ final class ProfileServer {
     file.addEventListener('change',function(){
       if(this.files[0]){
         const f=this.files[0];
-        if(!f.name.endsWith('.conf')&&!f.name.endsWith('.txt')){
-          showError("Please select a .conf or .txt file.");return;
+        if(!f.name.match(/\\.(conf|ovpn|txt)$/i)){
+          showError("Please select a .conf, .ovpn, or .txt file.");return;
         }
         fileName.textContent=f.name;
         fileLabel.classList.add('active');
         fileLabel.innerHTML='&#10003; '+f.name;
-        // Auto-fill name from filename
         if(!nameField.value.trim()){
-          nameField.value=f.name.replace(/\\.(conf|txt)$/,'');
+          nameField.value=f.name.replace(/\\.(conf|ovpn|txt)$/i,'');
         }
         const r=new FileReader();
         r.onload=function(e){config.value=e.target.result;validate()};
