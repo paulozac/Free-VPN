@@ -23,7 +23,6 @@ struct ContentView: View {
     @State private var renamingProfile: SavedProfile?
     @State private var renameText = ""
     @State private var deletingProfile: SavedProfile?
-    @AppStorage("splitTunnelEnabled") private var splitTunnelEnabled = true
 
     var body: some View {
         NavigationStack {
@@ -70,21 +69,12 @@ struct ContentView: View {
                     }
                     .disabled(vpnManager.connectionState == .disconnecting)
 
-                    Toggle("Split Tunnel", isOn: $splitTunnelEnabled)
-                        .onChange(of: splitTunnelEnabled) {
-                            if vpnManager.isConfigured {
-                                reconfigureWithSplitTunnel()
-                            }
-                        }
-
                     Button {
                         profileServer.onProfileReceived = { name, config in
                             let error = profileStore.addProfile(name: name, configString: config)
                             if error == nil, let profile = profileStore.profiles.last {
                                 profileStore.selectProfile(profile)
                                 applySelectedProfile()
-                                showingUpload = false
-                                profileServer.stop()
                             }
                         }
                         profileServer.start()
@@ -97,7 +87,7 @@ struct ContentView: View {
                     Spacer().frame(height: 20)
                 }
                 .focusSection()
-                .frame(width: UIScreen.main.bounds.width * 0.4)
+                .containerRelativeFrame(.horizontal) { length, _ in length * 0.4 }
                 .padding(.horizontal, 40)
 
                 // Right: Profile list
@@ -115,16 +105,31 @@ struct ContentView: View {
                         VStack(spacing: 2) {
                             ForEach(profileStore.profiles) { profile in
                                 Button {
+                                    let wasConnected = vpnManager.connectionState == .connected || vpnManager.connectionState == .connecting
                                     profileStore.selectProfile(profile)
-                                    applySelectedProfile()
+                                    if wasConnected {
+                                        reconnectWithProfile(profile)
+                                    } else {
+                                        applySelectedProfile()
+                                    }
                                 } label: {
                                     HStack {
                                         Image(systemName: profile.id == profileStore.selectedProfileID ? "checkmark.circle.fill" : "circle")
                                             .foregroundStyle(profile.id == profileStore.selectedProfileID ? Theme.accent : .secondary)
 
                                         VStack(alignment: .leading) {
-                                            Text(profile.name)
-                                                .font(.body)
+                                            HStack(spacing: 6) {
+                                                Text(profile.name)
+                                                    .font(.body)
+                                                Text(profile.vpnProtocol.shortName)
+                                                    .font(.caption2)
+                                                    .fontWeight(.semibold)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(profile.vpnProtocol == .wireGuard ? Theme.accent.opacity(0.2) : Color.orange.opacity(0.2))
+                                                    .foregroundStyle(profile.vpnProtocol == .wireGuard ? Theme.accent : .orange)
+                                                    .clipShape(Capsule())
+                                            }
                                             if let endpoint = profile.endpoint {
                                                 Text(endpoint)
                                                     .font(.caption)
@@ -161,7 +166,7 @@ struct ContentView: View {
                     }
                 }
                 .focusSection()
-                .frame(width: UIScreen.main.bounds.width * 0.5)
+                .containerRelativeFrame(.horizontal) { length, _ in length * 0.5 }
                 .padding(.trailing, 40)
             }
             .alert("Error", isPresented: .init(
@@ -209,7 +214,9 @@ struct ContentView: View {
             }) {
                 NavigationStack {
                     if let url = profileServer.localURL {
-                        QRCodeView(url: url)
+                        QRCodeView(url: url) {
+                            showingUpload = false
+                        }
                     } else {
                         ProgressView("Starting server...")
                     }
@@ -226,14 +233,13 @@ struct ContentView: View {
     private func applySelectedProfile() {
         guard let profile = profileStore.selectedProfile else { return }
         Task {
-            await vpnManager.configure(with: profile.configString, splitTunnel: splitTunnelEnabled)
+            await vpnManager.configure(with: profile.configString, protocolType: profile.vpnProtocol)
         }
     }
 
-    private func reconfigureWithSplitTunnel() {
-        guard let profile = profileStore.selectedProfile else { return }
+    private func reconnectWithProfile(_ profile: SavedProfile) {
         Task {
-            await vpnManager.reconfigure(with: profile.configString, splitTunnel: splitTunnelEnabled)
+            await vpnManager.reconfigure(with: profile.configString, protocolType: profile.vpnProtocol)
         }
     }
 

@@ -99,6 +99,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         log.info("OpenVPN config received (\(ovpnConfig.count) chars)")
+        log.info("OpenVPN config preview: \(String(ovpnConfig.prefix(200)), privacy: .public)")
 
         let configuration = OpenVPNConfiguration()
         configuration.fileContent = ovpnConfig.data(using: .utf8)
@@ -109,13 +110,17 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             evaluation = try openVPNAdapter.apply(configuration: configuration)
         } catch {
             log.error("Failed to apply OpenVPN config: \(error.localizedDescription)")
+            log.error("OpenVPN apply error details: \((error as NSError).userInfo)")
             throw NEVPNError(.configurationInvalid)
         }
 
+        log.info("OpenVPN config applied. autologin=\(evaluation.autologin)")
+
         // Provide credentials if needed
-        if evaluation.autologin == false {
+        if !evaluation.autologin {
             let username = providerConfig["username"] as? String ?? ""
             let password = providerConfig["password"] as? String ?? ""
+            log.info("OpenVPN requires auth. username provided: \(!username.isEmpty)")
             if !username.isEmpty {
                 let credentials = OpenVPNCredentials()
                 credentials.username = username
@@ -126,62 +131,111 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     log.error("Failed to provide credentials: \(error.localizedDescription)")
                     throw NEVPNError(.configurationInvalid)
                 }
+            } else {
+                log.warning("OpenVPN requires auth but no credentials provided — connection may fail")
             }
         }
 
-        // Connect using async/await bridge
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            self.openVPNStartCompletion = { error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
+        log.info("Starting OpenVPN connection...")
+
+        // Connect using async/await bridge with timeout
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    self.openVPNStartCompletion = { error in
+                        if let error = error {
+                            continuation.resume(throwing: error)
+                        } else {
+                            continuation.resume()
+                        }
+                    }
+                    self.openVPNAdapter.connect(using: self.packetFlow)
                 }
             }
-            openVPNAdapter.connect(using: packetFlow)
+
+            group.addTask {
+                try await Task.sleep(nanoseconds: 30_000_000_000) // 30 second timeout
+                throw NEVPNError(.connectionFailed)
+            }
+
+            // Wait for whichever finishes first
+            try await group.next()
+            group.cancelAll()
         }
 
         log.info("OpenVPN tunnel started successfully")
     }
 }
 
+// MARK: - NEPacketTunnelFlow + OpenVPNAdapterPacketFlow
+
+extension NEPacketTunnelFlow: @retroactive OpenVPNAdapterPacketFlow {}
+
 // MARK: - OpenVPNAdapterDelegate
 
 extension PacketTunnelProvider: OpenVPNAdapterDelegate {
 
-    func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, configureTunnelWithNetworkSettings networkSettings: NEPacketTunnelNetworkSettings?, completionHandler: @escaping (Error?) -> Void) {
-        if let networkSettings = networkSettings {
-            setTunnelNetworkSettings(networkSettings) { error in
-                completionHandler(error)
+    func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, configureTunnelWithNetworkSettings networkSettings: NEPacketTunnelNetworkSettings?, completionHandler: @escaping ((any Error)?) -> Void) {
+        if let settings = networkSettings {
+            log.info("OpenVPN configuring tunnel network settings:")
+            if let ipv4 = settings.ipv4Settings {
+                log.info("  IPv4: addresses=\(ipv4.addresses) masks=\(ipv4.subnetMasks)")
+                log.info("  IPv4 includedRoutes: \(ipv4.includedRoutes?.map { "\($0.destinationAddress)/\($0.destinationSubnetMask)" } ?? [])")
+            }
+            if let dns = settings.dnsSettings {
+                log.info("  DNS servers: \(dns.servers)")
+                log.info("  DNS search domains: \(dns.searchDomains ?? [])")
+            }
+            log.info("  MTU: \(settings.mtu ?? 0)")
+
+            // Ensure DNS is configured — if OpenVPN server didn't push DNS, add fallback
+            if settings.dnsSettings == nil || settings.dnsSettings?.servers.isEmpty == true {
+                log.warning("OpenVPN did not provide DNS servers, adding fallback DNS")
+                let dns = NEDNSSettings(servers: ["1.1.1.1", "8.8.8.8"])
+                settings.dnsSettings = dns
             }
         } else {
-            setTunnelNetworkSettings(nil) { error in
-                completionHandler(error)
+            log.warning("OpenVPN provided nil network settings")
+        }
+
+        setTunnelNetworkSettings(networkSettings) { [weak self] error in
+            if let error {
+                self?.log.error("Failed to set tunnel network settings: \(error.localizedDescription)")
+            } else {
+                self?.log.info("Tunnel network settings applied successfully")
             }
+            completionHandler(error)
         }
     }
 
     func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, handleEvent event: OpenVPNAdapterEvent, message: String?) {
+        log.info("OpenVPN event: \(event.rawValue), message: \(message ?? "nil", privacy: .public)")
         switch event {
         case .connected:
-            log.info("OpenVPN connected")
+            log.info("OpenVPN connected successfully")
+            reasserting = false
             openVPNStartCompletion?(nil)
             openVPNStartCompletion = nil
         case .disconnected:
             log.info("OpenVPN disconnected")
+            openVPNStartCompletion?(NEVPNError(.connectionFailed))
+            openVPNStartCompletion = nil
         case .reconnecting:
             log.info("OpenVPN reconnecting")
+            reasserting = true
         default:
-            log.info("OpenVPN event: \(event.rawValue), message: \(message ?? "nil")")
+            break
         }
     }
 
-    func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, handleError error: NSError) {
-        log.error("OpenVPN error: \(error.localizedDescription)")
+    func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, handleError error: any Error) {
+        let nsError = error as NSError
+        let isFatal = nsError.userInfo[OpenVPNAdapterErrorFatalKey] as? Bool ?? false
+        log.error("OpenVPN error (fatal=\(isFatal)): \(error.localizedDescription, privacy: .public)")
+        log.error("OpenVPN error details: \(nsError.domain) code=\(nsError.code) \(nsError.userInfo)")
 
-        let isFatal = error.userInfo[OpenVPNAdapterErrorFatalKey] as? Bool ?? false
         if isFatal {
-            log.error("Fatal OpenVPN error, stopping tunnel")
+            log.error("Fatal OpenVPN error, failing connection")
             openVPNStartCompletion?(error)
             openVPNStartCompletion = nil
         }

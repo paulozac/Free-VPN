@@ -11,6 +11,9 @@
 		C38F5FCB2F8B2B2500914D72 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */; };
 		C3F8A5DF2F8B78C8008A4180 /* Packet Tunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C3DC4E652F8B1F030056A4E5 /* Packet Tunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C3F8A5E42F8B7953008A4180 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = C3F8A5E32F8B7953008A4180 /* WireGuardKit */; };
+		C3F8A5E92F8C7B4A008A4180 /* OpenVPNAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = C3F8A5E82F8C7B4A008A4180 /* OpenVPNAdapter */; };
+		C3F8A5EB2F8C7BC9008A4180 /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3F8A5EA2F8C7BC9008A4180 /* SystemConfiguration.framework */; };
+		C3F8A5ED2F8C7BDD008A4180 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3F8A5EC2F8C7BDD008A4180 /* UIKit.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -42,6 +45,8 @@
 		C3DC4E652F8B1F030056A4E5 /* Packet Tunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Packet Tunnel.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NetworkExtension.framework; path = System/Library/Frameworks/NetworkExtension.framework; sourceTree = SDKROOT; };
 		C3F27A542F889F05005BFB60 /* Free VPN.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Free VPN.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C3F8A5EA2F8C7BC9008A4180 /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
+		C3F8A5EC2F8C7BDD008A4180 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -76,7 +81,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				C3F8A5E42F8B7953008A4180 /* WireGuardKit in Frameworks */,
+				C3F8A5E92F8C7B4A008A4180 /* OpenVPNAdapter in Frameworks */,
+				C3F8A5EB2F8C7BC9008A4180 /* SystemConfiguration.framework in Frameworks */,
 				C38F5FC62F8B2A0A00914D72 /* NetworkExtension.framework in Frameworks */,
+				C3F8A5ED2F8C7BDD008A4180 /* UIKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -94,6 +102,8 @@
 		C3DC4E662F8B1F030056A4E5 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				C3F8A5EC2F8C7BDD008A4180 /* UIKit.framework */,
+				C3F8A5EA2F8C7BC9008A4180 /* SystemConfiguration.framework */,
 				C38F5FC92F8B2A2A00914D72 /* Network.framework */,
 				C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */,
 			);
@@ -140,6 +150,7 @@
 			name = "Packet Tunnel";
 			packageProductDependencies = (
 				C3F8A5E32F8B7953008A4180 /* WireGuardKit */,
+				C3F8A5E82F8C7B4A008A4180 /* OpenVPNAdapter */,
 			);
 			productName = "Packet Tunnel";
 			productReference = C3DC4E652F8B1F030056A4E5 /* Packet Tunnel.appex */;
@@ -199,6 +210,7 @@
 			packageReferences = (
 				C38F5FCC2F8B2F0B00914D72 /* XCRemoteSwiftPackageReference "swift-algorithms" */,
 				C3F8A5DE2F8B77A2008A4180 /* XCLocalSwiftPackageReference "WireGuardKit" */,
+				C3F8A5E72F8C7B4A008A4180 /* XCLocalSwiftPackageReference "OpenVPNAdapter" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C3F27A552F889F05005BFB60 /* Products */;
@@ -270,7 +282,6 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = "$(​SRCROOT)/​Wire​Guard​Kit​/​Sources​/​Wire​Guard​Kit​Go";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn.PacketTunnel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -300,7 +311,6 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = "$(​SRCROOT)/​Wire​Guard​Kit​/​Sources​/​Wire​Guard​Kit​Go";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn.PacketTunnel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -538,6 +548,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = WireGuardKit;
 		};
+		C3F8A5E72F8C7B4A008A4180 /* XCLocalSwiftPackageReference "OpenVPNAdapter" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = OpenVPNAdapter;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -556,6 +570,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C3F8A5DE2F8B77A2008A4180 /* XCLocalSwiftPackageReference "WireGuardKit" */;
 			productName = WireGuardKit;
+		};
+		C3F8A5E82F8C7B4A008A4180 /* OpenVPNAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenVPNAdapter;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -33,7 +33,7 @@ struct WireGuardConfig {
 extension WireGuardConfig {
 
     /// Parses a standard WireGuard .conf file content into a WireGuardConfig.
-    static func parse(from configString: String) throws -> WireGuardConfig {
+    nonisolated static func parse(from configString: String) throws -> WireGuardConfig {
         var interfaceConfig: InterfaceConfig?
         var peers: [PeerConfig] = []
 
@@ -259,7 +259,7 @@ extension WireGuardConfig {
     }
 
     /// Validates a config string and returns a user-friendly error message, or nil if valid.
-    static func validate(_ configString: String) -> String? {
+    nonisolated static func validate(_ configString: String) -> String? {
         let trimmed = configString.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             return ConfigError.emptyConfig.userFriendlyMessage

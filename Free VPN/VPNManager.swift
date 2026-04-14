@@ -46,13 +46,13 @@ final class VPNManager {
 
     // MARK: - Public API
 
-    func configure(with configString: String, protocolType: VPNProtocolType = .wireGuard, splitTunnel: Bool = true) async {
+    func configure(with configString: String, protocolType: VPNProtocolType = .wireGuard) async {
         errorMessage = nil
         log.info("Configuring VPN (\(protocolType.displayName)) with config (\(configString.count) chars)")
 
         switch protocolType {
         case .wireGuard:
-            await configureWireGuard(configString: configString, splitTunnel: splitTunnel)
+            await configureWireGuard(configString: configString)
         case .openVPN:
             await configureOpenVPN(configString: configString)
         }
@@ -91,14 +91,17 @@ final class VPNManager {
         }
     }
 
-    func reconfigure(with configString: String, protocolType: VPNProtocolType = .wireGuard, splitTunnel: Bool) async {
+    func reconfigure(with configString: String, protocolType: VPNProtocolType = .wireGuard) async {
         let wasConnected = connectionState == .connected || connectionState == .connecting || connectionState == .reasserting
         if wasConnected {
             disconnect()
-            try? await Task.sleep(for: .milliseconds(500))
+            // Wait 3 seconds after disconnect so tvOS "VPN Disconnected" notification clears
+            try? await Task.sleep(for: .seconds(3))
         }
-        await configure(with: configString, protocolType: protocolType, splitTunnel: splitTunnel)
+        await configure(with: configString, protocolType: protocolType)
         if wasConnected {
+            // Wait 3 seconds before reconnecting so notifications don't overlap
+            try? await Task.sleep(for: .seconds(3))
             connect()
         }
     }
@@ -109,7 +112,7 @@ final class VPNManager {
 
     // MARK: - WireGuard Configuration
 
-    private func configureWireGuard(configString: String, splitTunnel: Bool) async {
+    private func configureWireGuard(configString: String) async {
         let config: WireGuardConfig
         do {
             config = try WireGuardConfig.parse(from: configString)
@@ -124,18 +127,16 @@ final class VPNManager {
             serverAddress = endpoint
         }
 
-        // Build the config string, modifying AllowedIPs for split tunnel
+        // Replace 0.0.0.0/0 with 0.0.0.0/1 + 128.0.0.0/1 to keep local network accessible
         var configToSave = config
-        if splitTunnel {
-            for i in configToSave.peers.indices {
-                let allowedIPs = configToSave.peers[i].allowedIPs
-                if allowedIPs.contains("0.0.0.0/0") {
-                    configToSave.peers[i].allowedIPs = [
-                        "0.0.0.0/1", "128.0.0.0/1"
-                    ]
-                    if allowedIPs.contains("::/0") {
-                        configToSave.peers[i].allowedIPs.append("::/0")
-                    }
+        for i in configToSave.peers.indices {
+            let allowedIPs = configToSave.peers[i].allowedIPs
+            if allowedIPs.contains("0.0.0.0/0") {
+                configToSave.peers[i].allowedIPs = [
+                    "0.0.0.0/1", "128.0.0.0/1"
+                ]
+                if allowedIPs.contains("::/0") {
+                    configToSave.peers[i].allowedIPs.append("::/0")
                 }
             }
         }
@@ -231,7 +232,7 @@ final class VPNManager {
         let url = Bundle.main.url(forResource: "vpntest", withExtension: "conf", subdirectory: "profiles")
             ?? Bundle.main.url(forResource: "vpntest", withExtension: "conf")
 
-        if let url, let contents = try? String(contentsOf: url) {
+        if let url, let contents = try? String(contentsOf: url, encoding: .utf8) {
             log.info("Found bundled profile at: \(url.path)")
             await configure(with: contents)
             return
@@ -272,7 +273,7 @@ PublicKey = wwBMNHjRkr6MUhrTIo/Fha2MMiruofEyZ2Yysfbt9Ho=
     // MARK: - Server City Lookup
 
     private func lookupServerLocation() {
-        Task.detached {
+        Task {
             guard let url = URL(string: "https://ipinfo.io/json") else { return }
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
@@ -287,10 +288,8 @@ PublicKey = wwBMNHjRkr6MUhrTIo/Fha2MMiruofEyZ2Yysfbt9Ho=
                     if let region, !region.isEmpty { locationParts.append(region) }
                     if let country, !country.isEmpty { locationParts.append(country) }
 
-                    await MainActor.run {
-                        self.serverIP = ip
-                        self.serverCity = locationParts.joined(separator: ", ")
-                    }
+                    self.serverIP = ip
+                    self.serverCity = locationParts.joined(separator: ", ")
                 }
             } catch {
                 // Location lookup is best-effort
@@ -312,7 +311,8 @@ PublicKey = wwBMNHjRkr6MUhrTIo/Fha2MMiruofEyZ2Yysfbt9Ho=
             object: connection,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
                 self?.updateConnectionState()
             }
         }

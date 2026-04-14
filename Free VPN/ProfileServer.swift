@@ -37,7 +37,7 @@ final class ProfileServer {
         }
 
         listener?.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 switch state {
                 case .ready:
@@ -146,27 +146,30 @@ final class ProfileServer {
         }
 
         // Detect protocol type and validate accordingly
-        let detectedProtocol = VPNProtocolType.detect(from: configValue)
+        let lower = configValue.lowercased()
+        let isWireGuard = lower.contains("[interface]") && lower.contains("[peer]") && lower.contains("privatekey")
+        let hasClient = lower.components(separatedBy: .newlines).contains { $0.trimmingCharacters(in: .whitespaces) == "client" }
+        let isOpenVPN = !isWireGuard && (lower.contains("remote ") || lower.contains("<ca>") || hasClient)
 
-        switch detectedProtocol {
-        case .wireGuard:
+        if isWireGuard {
             if let validationError = WireGuardConfig.validate(configValue) {
                 sendErrorPage(message: validationError, on: connection)
                 return
             }
-        case .openVPN:
+        } else if isOpenVPN {
             if let validationError = OpenVPNConfig.validate(configValue) {
                 sendErrorPage(message: validationError, on: connection)
                 return
             }
         }
 
+        let protocolName = isOpenVPN ? "OpenVPN" : "WireGuard"
+
         Task { @MainActor in
-            self.log.info("Received valid \(detectedProtocol.displayName) profile '\(profileName)' via HTTP upload (\(configValue.count) chars)")
             self.onProfileReceived?(profileName, configValue)
         }
 
-        sendSuccessPage(profileName: profileName.isEmpty ? "Unnamed" : profileName, protocolName: detectedProtocol.displayName, on: connection)
+        sendSuccessPage(profileName: profileName.isEmpty ? "Unnamed" : profileName, protocolName: protocolName, on: connection)
     }
 
     // MARK: - Form Parsing
@@ -225,53 +228,66 @@ final class ProfileServer {
     private nonisolated static func responsePage(icon: String, iconColor: String, title: String, message: String, showBackLink: Bool) -> String {
         """
         <!DOCTYPE html>
-        <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+        <html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
         <style>
-        body{font-family:-apple-system,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#1a1a1a;color:#fff}
-        .card{text-align:center;padding:40px;border-radius:16px;background:#2a2a2a;max-width:440px}
-        .icon{font-size:64px;margin-bottom:16px;color:\(iconColor)}
-        h1{margin:0 0 12px;font-size:22px}
-        p{color:#aaa;font-size:15px;line-height:1.5;margin:0 0 24px}
-        a{color:#0a84ff;text-decoration:none;font-weight:600;font-size:15px}
-        a:hover{text-decoration:underline}
+        *{box-sizing:border-box}
+        body{font-family:-apple-system,system-ui,'Roboto',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px;background:#f5f5f5;color:#212121}
+        .card{text-align:center;padding:32px 24px;border-radius:16px;background:#fff;max-width:440px;width:100%;box-shadow:0 2px 8px rgba(0,0,0,0.08),0 1px 2px rgba(0,0,0,0.04)}
+        @media(min-width:480px){.card{padding:48px 40px}}
+        .icon{font-size:64px;margin-bottom:20px;color:\(iconColor)}
+        h1{margin:0 0 12px;font-size:22px;font-weight:600;color:#1a1a1a}
+        p{color:#666;font-size:16px;line-height:1.6;margin:0 0 28px}
+        a{display:inline-flex;align-items:center;gap:6px;color:#fff;background:#1a73e8;text-decoration:none;font-weight:600;font-size:15px;padding:12px 24px;border-radius:24px;transition:background 0.2s}
+        a:hover{background:#1557b0}
+        a:active{background:#12489e}
         </style></head><body>
         <div class="card">
         <div class="icon">\(icon)</div>
         <h1>\(title)</h1>
         <p>\(message)</p>
-        \(showBackLink ? "<a href=\"/\">&#8592; Upload another profile</a>" : "")
+        \(showBackLink ? "<a href=\"/\">&#8592; Upload another</a>" : "")
         </div></body></html>
         """
     }
 
-    private static let uploadPageHTML = """
+    private nonisolated static let uploadPageHTML = """
     <!DOCTYPE html>
-    <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+    <html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+    <meta name="theme-color" content="#f5f5f5">
     <style>
-    *{box-sizing:border-box}
-    body{font-family:-apple-system,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#1a1a1a;color:#fff}
-    .card{max-width:480px;width:100%;padding:40px;border-radius:16px;background:#2a2a2a}
-    h1{margin:0 0 4px;font-size:24px}
-    .sub{color:#888;margin:0 0 24px;font-size:14px}
-    label.field{display:block;color:#aaa;font-size:13px;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
-    input[type=text]{width:100%;padding:12px;background:#111;color:#fff;border:1px solid #444;border-radius:8px;font-size:15px;margin-bottom:16px}
-    input[type=text]:focus{outline:none;border-color:#0a84ff}
-    textarea{width:100%;height:180px;background:#111;color:#0f0;border:1px solid #444;border-radius:8px;padding:12px;font-family:monospace;font-size:13px;resize:vertical}
-    textarea:focus{outline:none;border-color:#0a84ff}
-    .or{text-align:center;color:#666;margin:14px 0;font-size:13px}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    body{font-family:-apple-system,system-ui,'Roboto',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px;background:#f5f5f5;color:#212121}
+    .card{max-width:520px;width:100%;padding:28px 20px;border-radius:16px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.08),0 1px 2px rgba(0,0,0,0.04)}
+    @media(min-width:480px){.card{padding:40px}}
+    h1{margin:0 0 4px;font-size:26px;text-align:center;font-weight:700;color:#1a1a1a}
+    .sub{color:#757575;margin:0 0 28px;font-size:15px;text-align:center}
+    label.field{display:block;color:#757575;font-size:12px;font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.8px}
+    input[type=text]{width:100%;padding:16px;background:#fafafa;color:#212121;border:1.5px solid #e0e0e0;border-radius:12px;font-size:17px;margin-bottom:20px;transition:border-color 0.2s}
+    input[type=text]:focus{outline:none;border-color:#1a73e8;background:#fff;box-shadow:0 0 0 3px rgba(26,115,232,0.1)}
+    input[type=text]::placeholder{color:#bdbdbd}
     input[type=file]{display:none}
-    .file-label{display:block;text-align:center;padding:14px;border:2px dashed #444;border-radius:8px;cursor:pointer;color:#888;font-size:14px;transition:all 0.2s}
-    .file-label:hover{border-color:#0a84ff;color:#0a84ff}
-    .file-label.active{border-color:#34c759;color:#34c759;border-style:solid}
-    .file-name{color:#0a84ff;margin-top:8px;font-size:13px;text-align:center;min-height:20px}
-    .detected{text-align:center;margin-top:8px;font-size:13px;font-weight:600;min-height:20px}
-    .detected.wg{color:#34c759}
-    .detected.ovpn{color:#ff9500}
-    button{width:100%;padding:14px;background:#0a84ff;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;margin-top:20px;transition:background 0.2s}
-    button:hover{background:#0070e0}
-    button:disabled{background:#333;color:#666;cursor:not-allowed}
-    .hint{color:#666;font-size:12px;margin-top:16px;text-align:center;line-height:1.5}
-    .error{background:#ff3b3020;border:1px solid #ff3b30;color:#ff6b6b;padding:12px;border-radius:8px;font-size:14px;margin-bottom:16px;display:none}
+    .file-label{display:flex;align-items:center;justify-content:center;gap:10px;padding:22px;border:2px dashed #d0d0d0;border-radius:12px;cursor:pointer;color:#757575;font-size:17px;font-weight:500;transition:all 0.2s;min-height:72px;text-align:center;background:#fafafa}
+    .file-label:hover,.file-label:active{border-color:#1a73e8;color:#1a73e8;background:#e8f0fe}
+    .file-label.active{border-color:#34a853;color:#34a853;border-style:solid;background:#e6f4ea}
+    .file-name{color:#1a73e8;margin-top:8px;font-size:14px;text-align:center;min-height:20px}
+    .detected{text-align:center;margin-top:10px;font-size:15px;font-weight:600;min-height:22px}
+    .detected.wg{color:#34a853}
+    .detected.ovpn{color:#e8710a}
+    .paste-toggle{display:flex;align-items:center;justify-content:center;gap:6px;color:#9e9e9e;font-size:14px;margin:20px 0 8px;cursor:pointer;-webkit-user-select:none;user-select:none;transition:color 0.2s}
+    .paste-toggle:hover{color:#616161}
+    .paste-toggle .arrow{transition:transform 0.2s;display:inline-block;font-size:10px}
+    .paste-toggle .arrow.open{transform:rotate(90deg)}
+    .paste-section{display:none;margin-top:8px}
+    .paste-section.open{display:block}
+    textarea{width:100%;height:180px;background:#fafafa;color:#333;border:1.5px solid #e0e0e0;border-radius:12px;padding:14px;font-family:'SF Mono',Menlo,monospace;font-size:14px;resize:vertical;transition:border-color 0.2s}
+    textarea:focus{outline:none;border-color:#1a73e8;background:#fff;box-shadow:0 0 0 3px rgba(26,115,232,0.1)}
+    textarea::placeholder{color:#bdbdbd}
+    button{width:100%;padding:18px;background:#1a73e8;color:#fff;border:none;border-radius:24px;font-size:18px;font-weight:600;cursor:pointer;margin-top:24px;transition:all 0.2s;min-height:56px;box-shadow:0 2px 6px rgba(26,115,232,0.3)}
+    button:hover{background:#1557b0;box-shadow:0 4px 12px rgba(26,115,232,0.4)}
+    button:active{background:#12489e;transform:scale(0.98)}
+    button:disabled{background:#e0e0e0;color:#9e9e9e;cursor:not-allowed;box-shadow:none}
+    .hint{color:#9e9e9e;font-size:13px;margin-top:20px;text-align:center;line-height:1.6}
+    .error{background:#fce8e6;border:1px solid #f5c6cb;color:#c62828;padding:14px;border-radius:12px;font-size:15px;margin-bottom:16px;display:none;line-height:1.4}
     </style></head><body>
     <div class="card">
     <h1>ZacVPN</h1>
@@ -280,23 +296,35 @@ final class ProfileServer {
     <form method="POST" id="form">
     <label class="field" for="name">Profile Name (optional)</label>
     <input type="text" name="name" id="name" placeholder="e.g. Home Server, US East, Work VPN">
-    <label class="field" for="config">Configuration</label>
-    <textarea name="config" id="config" placeholder="Paste WireGuard (.conf) or OpenVPN (.ovpn) config here..."></textarea>
-    <div class="detected" id="detected"></div>
-    <div class="or">&#8212; or &#8212;</div>
-    <label class="file-label" for="file" id="fileLabel">&#128193; Choose .conf or .ovpn file</label>
-    <input type="file" id="file" accept=".conf,.ovpn,.txt">
+    <label class="file-label" for="file" id="fileLabel">&#128193; Choose VPN config file</label>
+    <input type="file" id="file">
     <div class="file-name" id="fileName"></div>
+    <div class="detected" id="detected"></div>
+    <div class="paste-toggle" id="pasteToggle"><span class="arrow" id="arrow">&#9654;</span> Or paste config manually</div>
+    <div class="paste-section" id="pasteSection">
+    <textarea name="config" id="config" placeholder="Paste WireGuard (.conf) or OpenVPN (.ovpn) config here..."></textarea>
+    </div>
+    <input type="hidden" name="config" id="configHidden" disabled>
     <button type="submit" id="btn" disabled>Upload Profile</button>
     </form>
-    <p class="hint">Supports WireGuard (.conf) and OpenVPN (.ovpn) profiles.</p>
+    <p class="hint">Supports WireGuard and OpenVPN profiles.<br>Any file type accepted &mdash; content is validated automatically.</p>
     </div>
     <script>
     const config=document.getElementById('config'),file=document.getElementById('file'),
     btn=document.getElementById('btn'),fileName=document.getElementById('fileName'),
     nameField=document.getElementById('name'),errorDiv=document.getElementById('error'),
     fileLabel=document.getElementById('fileLabel'),form=document.getElementById('form'),
-    detected=document.getElementById('detected');
+    detected=document.getElementById('detected'),pasteToggle=document.getElementById('pasteToggle'),
+    pasteSection=document.getElementById('pasteSection'),arrow=document.getElementById('arrow'),
+    configHidden=document.getElementById('configHidden');
+
+    pasteToggle.addEventListener('click',function(){
+      const open=pasteSection.classList.toggle('open');
+      arrow.classList.toggle('open',open);
+      if(open){config.disabled=false;configHidden.disabled=true;config.name='config';configHidden.name=''}
+    });
+
+    config.name='';configHidden.name='config';configHidden.disabled=false;
 
     function detectProtocol(c){
       const l=c.toLowerCase();
@@ -305,8 +333,13 @@ final class ProfileServer {
       return null;
     }
 
+    function getConfigValue(){
+      if(pasteSection.classList.contains('open'))return config.value.trim();
+      return configHidden.value.trim();
+    }
+
     function validate(){
-      const c=config.value.trim();
+      const c=getConfigValue();
       errorDiv.style.display='none';
       detected.textContent='';detected.className='detected';
       if(!c){btn.disabled=true;return}
@@ -321,7 +354,7 @@ final class ProfileServer {
         if(!c.match(/remote\\s+/im)){showError("Missing 'remote' directive.");btn.disabled=true;return}
         if(!c.includes('<ca>')&&!/^ca\\s+/m.test(c)){showError("Missing CA certificate (<ca> block or ca directive).");btn.disabled=true;return}
       }else{
-        showError("Could not detect config type. Make sure this is a valid WireGuard or OpenVPN config.");
+        showError("This doesn't look like a valid WireGuard or OpenVPN config file. Please check your file and try again.");
         btn.disabled=true;return;
       }
       errorDiv.style.display='none';
@@ -330,23 +363,36 @@ final class ProfileServer {
 
     function showError(msg){errorDiv.textContent=msg;errorDiv.style.display='block'}
 
-    config.addEventListener('input',validate);
+    config.addEventListener('input',function(){
+      configHidden.value=config.value;
+      validate();
+    });
 
     file.addEventListener('change',function(){
       if(this.files[0]){
         const f=this.files[0];
-        if(!f.name.match(/\\.(conf|ovpn|txt)$/i)){
-          showError("Please select a .conf, .ovpn, or .txt file.");return;
-        }
         fileName.textContent=f.name;
         fileLabel.classList.add('active');
         fileLabel.innerHTML='&#10003; '+f.name;
         if(!nameField.value.trim()){
-          nameField.value=f.name.replace(/\\.(conf|ovpn|txt)$/i,'');
+          nameField.value=f.name.replace(/\\.[^.]+$/,'');
         }
         const r=new FileReader();
-        r.onload=function(e){config.value=e.target.result;validate()};
+        r.onload=function(e){
+          const content=e.target.result;
+          configHidden.value=content;
+          config.value=content;
+          validate();
+        };
         r.readAsText(f);
+      }
+    });
+
+    form.addEventListener('submit',function(){
+      if(pasteSection.classList.contains('open')){
+        configHidden.disabled=true;config.name='config';
+      }else{
+        config.name='';configHidden.name='config';configHidden.disabled=false;
       }
     });
     </script>

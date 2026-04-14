@@ -10,6 +10,7 @@ import CoreImage.CIFilterBuiltins
 
 struct QRCodeView: View {
     let url: String
+    var onClose: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 30) {
@@ -38,6 +39,14 @@ struct QRCodeView: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.5)
                 .multilineTextAlignment(.center)
+
+            Button {
+                onClose?()
+            } label: {
+                Text("Close")
+                    .frame(maxWidth: .infinity)
+            }
+            .padding(.top, 10)
         }
         .padding(40)
     }

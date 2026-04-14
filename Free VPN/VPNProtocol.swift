@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum VPNProtocolType: String, Codable {
+enum VPNProtocolType: String, Codable, Sendable {
     case wireGuard
     case openVPN
 
@@ -35,8 +35,8 @@ enum VPNProtocolType: String, Codable {
         }
 
         // OpenVPN: has client directive, remote server, or inline certificates
-        if lower.contains("remote ") || lower.contains("<ca>") ||
-            lower.range(of: "^client\\s*$", options: [.regularExpression, .anchorsMatchLines]) != nil {
+        let hasClient = lower.components(separatedBy: .newlines).contains { $0.trimmingCharacters(in: .whitespaces) == "client" }
+        if lower.contains("remote ") || lower.contains("<ca>") || hasClient {
             return .openVPN
         }
 
@@ -50,7 +50,7 @@ enum VPNProtocolType: String, Codable {
 enum OpenVPNConfig {
 
     /// Validates an OpenVPN config string. Returns error message or nil if valid.
-    static func validate(_ configString: String) -> String? {
+    nonisolated static func validate(_ configString: String) -> String? {
         let trimmed = configString.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             return "The configuration is empty."
@@ -65,7 +65,7 @@ enum OpenVPNConfig {
 
         // Must have a CA certificate (inline or file reference)
         let hasInlineCA = lower.contains("<ca>")
-        let hasCAFile = lower.range(of: "^ca\\s+", options: [.regularExpression, .anchorsMatchLines]) != nil
+        let hasCAFile = lower.components(separatedBy: .newlines).contains { $0.trimmingCharacters(in: .whitespaces).hasPrefix("ca ") }
         if !hasInlineCA && !hasCAFile {
             return "Missing CA certificate. An OpenVPN config must include a <ca> block or 'ca' file reference."
         }
