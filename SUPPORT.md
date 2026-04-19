@@ -25,7 +25,7 @@ No. ZacVPN collects zero data. No analytics, no accounts, no tracking. See our [
 
 For support inquiries, bug reports, or feature requests:
 
-**Email:** [zacsoftware@gmail.com](mailto:zacsoftware@gmail.com)
+**Email:** [pzacsoft@gmail.com](mailto:pzacsoft@gmail.com)
 
 We typically respond within 48 hours.
 

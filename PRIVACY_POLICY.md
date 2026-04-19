@@ -49,4 +49,4 @@ If we update this privacy policy, we will post the revised version here with an 
 
 If you have questions about this privacy policy, please contact us at:
 
-**Email:** zacvpn@proton.me
+**Email:** pzacsoft@gmail.com
