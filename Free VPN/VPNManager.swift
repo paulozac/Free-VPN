@@ -27,26 +27,26 @@ final class VPNManager {
     private(set) var serverAddress: String?
     private(set) var serverCity: String?
     private(set) var serverIP: String?
+    private(set) var bytesIn: UInt64 = 0
+    private(set) var bytesOut: UInt64 = 0
     var errorMessage: String?
 
     private let log = Logger(subsystem: "com.zacvpn.zacvpn", category: "VPNManager")
     private var tunnelManager: NETunnelProviderManager?
     private var statusObserver: NSObjectProtocol?
+    private var statsTask: Task<Void, Never>?
 
     private let tunnelBundleIdentifier = "com.zacvpn.zacvpn.PacketTunnel"
 
     init() {
         Task {
             await loadExistingManager()
-            if tunnelManager == nil {
-                await loadBundledProfile()
-            }
         }
     }
 
     // MARK: - Public API
 
-    func configure(with configString: String, protocolType: VPNProtocolType = .wireGuard) async {
+    func configure(with configString: String, protocolType: VPNProtocolType = .wireGuard, username: String? = nil, password: String? = nil) async {
         errorMessage = nil
         log.info("Configuring VPN (\(protocolType.displayName)) with config (\(configString.count) chars)")
 
@@ -54,7 +54,7 @@ final class VPNManager {
         case .wireGuard:
             await configureWireGuard(configString: configString)
         case .openVPN:
-            await configureOpenVPN(configString: configString)
+            await configureOpenVPN(configString: configString, username: username, password: password)
         }
     }
 
@@ -75,13 +75,23 @@ final class VPNManager {
         tunnelManager?.connection.stopVPNTunnel()
     }
 
+    /// Disconnects and waits until the tunnel is fully disconnected before returning.
+    func disconnectAndWait() async {
+        guard connectionState == .connected || connectionState == .connecting || connectionState == .reasserting else { return }
+        disconnect()
+        // Wait for disconnected state (up to 5 seconds)
+        for _ in 0..<50 {
+            if connectionState == .disconnected || connectionState == .invalid {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        }
+    }
+
     func toggleConnection() {
         switch connectionState {
         case .invalid:
-            Task {
-                await loadBundledProfile()
-                connect()
-            }
+            errorMessage = "VPN not configured. Upload a profile first."
         case .disconnected:
             connect()
         case .connected, .connecting, .reasserting:
@@ -91,17 +101,13 @@ final class VPNManager {
         }
     }
 
-    func reconfigure(with configString: String, protocolType: VPNProtocolType = .wireGuard) async {
+    func reconfigure(with configString: String, protocolType: VPNProtocolType = .wireGuard, username: String? = nil, password: String? = nil) async {
         let wasConnected = connectionState == .connected || connectionState == .connecting || connectionState == .reasserting
         if wasConnected {
             disconnect()
-            // Wait 3 seconds after disconnect so tvOS "VPN Disconnected" notification clears
-            try? await Task.sleep(for: .seconds(3))
         }
-        await configure(with: configString, protocolType: protocolType)
+        await configure(with: configString, protocolType: protocolType, username: username, password: password)
         if wasConnected {
-            // Wait 3 seconds before reconnecting so notifications don't overlap
-            try? await Task.sleep(for: .seconds(3))
             connect()
         }
     }
@@ -154,7 +160,7 @@ final class VPNManager {
 
     // MARK: - OpenVPN Configuration
 
-    private func configureOpenVPN(configString: String) async {
+    private func configureOpenVPN(configString: String, username: String? = nil, password: String? = nil) async {
         let endpoint = OpenVPNConfig.extractEndpoint(from: configString)
         serverAddress = endpoint
 
@@ -165,7 +171,9 @@ final class VPNManager {
 
         await saveTunnelConfiguration(
             serverAddress: endpoint ?? "Unknown",
-            providerConfig: providerConfig
+            providerConfig: providerConfig,
+            username: username,
+            password: password
         )
     }
 
@@ -199,7 +207,7 @@ final class VPNManager {
         }
     }
 
-    private func saveTunnelConfiguration(serverAddress: String, providerConfig: [String: Any]) async {
+    private func saveTunnelConfiguration(serverAddress: String, providerConfig: [String: Any], username: String? = nil, password: String? = nil) async {
         let manager = tunnelManager ?? NETunnelProviderManager()
 
         let protocolConfig = NETunnelProviderProtocol()
@@ -207,8 +215,19 @@ final class VPNManager {
         protocolConfig.serverAddress = serverAddress
         protocolConfig.providerConfiguration = providerConfig
 
+        // Store credentials using Apple's standard NEVPNProtocol properties
+        if let username, !username.isEmpty {
+            protocolConfig.username = username
+            log.info("Set NEVPNProtocol.username: \(!username.isEmpty)")
+        }
+        if let password, !password.isEmpty {
+            let ref = Self.savePasswordToKeychain(password)
+            protocolConfig.passwordReference = ref
+            log.info("Set NEVPNProtocol.passwordReference: \(ref != nil ? "set (\(ref!.count) bytes)" : "FAILED")")
+        }
+
         manager.protocolConfiguration = protocolConfig
-        manager.localizedDescription = "ZacVPN"
+        manager.localizedDescription = "Zac VPN Connect"
         manager.isEnabled = true
 
         do {
@@ -226,35 +245,47 @@ final class VPNManager {
         }
     }
 
-    private func loadBundledProfile() async {
-        log.info("Loading bundled VPN profile...")
+    // MARK: - Keychain
 
-        let url = Bundle.main.url(forResource: "vpntest", withExtension: "conf", subdirectory: "profiles")
-            ?? Bundle.main.url(forResource: "vpntest", withExtension: "conf")
+    private nonisolated static let keychainService = "com.zacvpn.zacvpn.vpnpassword"
+    private nonisolated static let keychainAccount = "vpn-credentials"
+    private nonisolated static let keychainAccessGroup = "group.com.zacvpn.zacvpn"
 
-        if let url, let contents = try? String(contentsOf: url, encoding: .utf8) {
-            log.info("Found bundled profile at: \(url.path)")
-            await configure(with: contents)
-            return
+    /// Saves the password to the Keychain and returns a persistent reference for NEVPNProtocol.passwordReference.
+    private nonisolated static func savePasswordToKeychain(_ password: String) -> Data? {
+        let log = Logger(subsystem: "com.zacvpn.zacvpn", category: "Keychain")
+        guard let passwordData = password.data(using: .utf8) else { return nil }
+
+        // Delete any existing item first
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecAttrAccessGroup as String: keychainAccessGroup
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        // Add new item and request persistent reference
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecAttrAccessGroup as String: keychainAccessGroup,
+            kSecValueData as String: passwordData,
+            kSecReturnPersistentRef as String: true,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+
+        var result: AnyObject?
+        let status = SecItemAdd(addQuery as CFDictionary, &result)
+        guard status == errSecSuccess, let persistentRef = result as? Data else {
+            log.error("Failed to save password to Keychain: \(status)")
+            return nil
         }
-
-        log.warning("Bundled profile not found in bundle, using embedded default config")
-        await configure(with: Self.defaultConfig)
+        log.info("Password saved to Keychain, persistentRef size: \(persistentRef.count) bytes")
+        return persistentRef
     }
 
-    private static let defaultConfig = """
-[Interface]
-Address = 10.0.0.7/24
-PrivateKey = kIdmDoBYI3QZqOHCrtn8Y9si1zSxxN2MJy4KAgaWSHA=
-DNS = 64.6.64.6,10.0.0.1
-MTU = 1420
-
-[Peer]
-AllowedIPs = 0.0.0.0/0,::/0
-Endpoint = njd4995.glddns.com:17654
-PersistentKeepalive = 25
-PublicKey = wwBMNHjRkr6MUhrTIo/Fha2MMiruofEyZ2Yysfbt9Ho=
-"""
 
     func removeConfiguration() async {
         guard let manager = tunnelManager else { return }
@@ -297,6 +328,62 @@ PublicKey = wwBMNHjRkr6MUhrTIo/Fha2MMiruofEyZ2Yysfbt9Ho=
         }
     }
 
+    // MARK: - Traffic Stats
+
+    private func startStatsPolling() {
+        stopStatsPolling()
+        statsTask = Task {
+            while !Task.isCancelled {
+                let stats = Self.readTunnelInterfaceStats()
+                bytesIn = stats.bytesIn
+                bytesOut = stats.bytesOut
+                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+            }
+        }
+    }
+
+    private func stopStatsPolling() {
+        statsTask?.cancel()
+        statsTask = nil
+    }
+
+    /// Reads byte counters from utun interfaces via getifaddrs.
+    private nonisolated static func readTunnelInterfaceStats() -> (bytesIn: UInt64, bytesOut: UInt64) {
+        var totalIn: UInt64 = 0
+        var totalOut: UInt64 = 0
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else {
+            return (0, 0)
+        }
+        defer { freeifaddrs(ifaddr) }
+
+        var cursor: UnsafeMutablePointer<ifaddrs>? = firstAddr
+        while let addr = cursor {
+            let name = String(cString: addr.pointee.ifa_name)
+            if name.hasPrefix("utun"), addr.pointee.ifa_addr.pointee.sa_family == UInt8(AF_LINK) {
+                if let data = addr.pointee.ifa_data {
+                    let networkData = data.assumingMemoryBound(to: if_data.self).pointee
+                    totalIn += UInt64(networkData.ifi_ibytes)
+                    totalOut += UInt64(networkData.ifi_obytes)
+                }
+            }
+            cursor = addr.pointee.ifa_next
+        }
+
+        return (totalIn, totalOut)
+    }
+
+    /// Formats bytes into a human-readable string (KB, MB, GB).
+    static func formattedBytes(_ bytes: UInt64) -> String {
+        let kb = Double(bytes) / 1_024
+        let mb = kb / 1_024
+        let gb = mb / 1_024
+        if gb >= 1 { return String(format: "%.1f GB", gb) }
+        if mb >= 1 { return String(format: "%.1f MB", mb) }
+        return String(format: "%.0f KB", max(kb, 0))
+    }
+
     // MARK: - Status Observation
 
     private func observeStatus() {
@@ -333,12 +420,16 @@ PublicKey = wwBMNHjRkr6MUhrTIo/Fha2MMiruofEyZ2Yysfbt9Ho=
             connectedDate = nil
             serverCity = nil
             serverIP = nil
+            bytesIn = 0
+            bytesOut = 0
+            stopStatsPolling()
         case .connecting:
             connectionState = .connecting
         case .connected:
             connectionState = .connected
             connectedDate = tunnelManager?.connection.connectedDate
             lookupServerLocation()
+            startStatsPolling()
         case .reasserting:
             connectionState = .reasserting
         case .disconnecting:

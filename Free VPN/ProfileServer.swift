@@ -18,8 +18,8 @@ final class ProfileServer {
     private(set) var isRunning = false
     private(set) var localURL: String?
 
-    /// Called with (name, configString) when a valid profile is uploaded.
-    var onProfileReceived: ((String, String) -> Void)?
+    /// Called with (name, configString, username?, password?) when a valid profile is uploaded.
+    var onProfileReceived: ((String, String, String?, String?) -> Void)?
 
     private let log = Logger(subsystem: "com.zacvpn.zacvpn", category: "ProfileServer")
     private var listener: NWListener?
@@ -165,8 +165,16 @@ final class ProfileServer {
 
         let protocolName = isOpenVPN ? "OpenVPN" : "WireGuard"
 
+        let username = (params["username"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = (params["password"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
         Task { @MainActor in
-            self.onProfileReceived?(profileName, configValue)
+            self.onProfileReceived?(
+                profileName,
+                configValue,
+                username.isEmpty ? nil : username,
+                password.isEmpty ? nil : password
+            )
         }
 
         sendSuccessPage(profileName: profileName.isEmpty ? "Unnamed" : profileName, protocolName: protocolName, on: connection)
@@ -273,6 +281,17 @@ final class ProfileServer {
     .detected{text-align:center;margin-top:10px;font-size:15px;font-weight:600;min-height:22px}
     .detected.wg{color:#34a853}
     .detected.ovpn{color:#e8710a}
+    .auth-section{display:none;margin-top:16px;padding:16px;background:#fff8e1;border:1.5px solid #ffe082;border-radius:12px}
+    .auth-section.visible{display:block}
+    .auth-section label.field{color:#e65100}
+    .auth-section input[type=text],.auth-section input[type=password]{width:100%;padding:16px;background:#fff;color:#212121;border:1.5px solid #e0e0e0;border-radius:12px;font-size:17px;margin-bottom:12px;transition:border-color 0.2s}
+    .auth-section input[type=text]:focus,.auth-section input[type=password]:focus{outline:none;border-color:#1a73e8;box-shadow:0 0 0 3px rgba(26,115,232,0.1)}
+    .auth-section input::placeholder{color:#bdbdbd}
+    .pw-wrap{position:relative}
+    .pw-wrap input{padding-right:52px}
+    .pw-toggle{position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;color:#9e9e9e;cursor:pointer;font-size:20px;padding:4px;margin:0;min-height:auto;width:auto;box-shadow:none}
+    .pw-toggle:hover{color:#616161}
+    .auth-hint{color:#bf360c;font-size:13px;margin-bottom:12px;font-weight:500}
     .paste-toggle{display:flex;align-items:center;justify-content:center;gap:6px;color:#9e9e9e;font-size:14px;margin:20px 0 8px;cursor:pointer;-webkit-user-select:none;user-select:none;transition:color 0.2s}
     .paste-toggle:hover{color:#616161}
     .paste-toggle .arrow{transition:transform 0.2s;display:inline-block;font-size:10px}
@@ -290,16 +309,26 @@ final class ProfileServer {
     .error{background:#fce8e6;border:1px solid #f5c6cb;color:#c62828;padding:14px;border-radius:12px;font-size:15px;margin-bottom:16px;display:none;line-height:1.4}
     </style></head><body>
     <div class="card">
-    <h1>ZacVPN</h1>
+    <h1>Zac VPN Connect</h1>
     <p class="sub">Upload a WireGuard or OpenVPN profile to your Apple TV</p>
     <div class="error" id="error"></div>
-    <form method="POST" id="form">
+    <form method="POST" id="form" autocomplete="off">
     <label class="field" for="name">Profile Name (optional)</label>
     <input type="text" name="name" id="name" placeholder="e.g. Home Server, US East, Work VPN">
     <label class="file-label" for="file" id="fileLabel">&#128193; Choose VPN config file</label>
     <input type="file" id="file">
     <div class="file-name" id="fileName"></div>
     <div class="detected" id="detected"></div>
+    <div class="auth-section" id="authSection">
+    <p class="auth-hint">&#128274; This profile requires authentication</p>
+    <label class="field" for="username">Username</label>
+    <input type="text" name="username" id="username" placeholder="Enter your VPN username" autocomplete="off">
+    <label class="field" for="password">Password</label>
+    <div class="pw-wrap">
+    <input type="password" name="password" id="password" placeholder="Enter your VPN password" autocomplete="off">
+    <button type="button" class="pw-toggle" id="pwToggle" tabindex="-1">&#128065;</button>
+    </div>
+    </div>
     <div class="paste-toggle" id="pasteToggle"><span class="arrow" id="arrow">&#9654;</span> Or paste config manually</div>
     <div class="paste-section" id="pasteSection">
     <textarea name="config" id="config" placeholder="Paste WireGuard (.conf) or OpenVPN (.ovpn) config here..."></textarea>
@@ -316,7 +345,10 @@ final class ProfileServer {
     fileLabel=document.getElementById('fileLabel'),form=document.getElementById('form'),
     detected=document.getElementById('detected'),pasteToggle=document.getElementById('pasteToggle'),
     pasteSection=document.getElementById('pasteSection'),arrow=document.getElementById('arrow'),
-    configHidden=document.getElementById('configHidden');
+    configHidden=document.getElementById('configHidden'),
+    authSection=document.getElementById('authSection'),
+    usernameField=document.getElementById('username'),
+    passwordField=document.getElementById('password');
 
     pasteToggle.addEventListener('click',function(){
       const open=pasteSection.classList.toggle('open');
@@ -333,6 +365,10 @@ final class ProfileServer {
       return null;
     }
 
+    function needsAuth(c){
+      return c.split('\\n').some(function(line){return line.trim().toLowerCase().startsWith('auth-user-pass')});
+    }
+
     function getConfigValue(){
       if(pasteSection.classList.contains('open'))return config.value.trim();
       return configHidden.value.trim();
@@ -342,6 +378,7 @@ final class ProfileServer {
       const c=getConfigValue();
       errorDiv.style.display='none';
       detected.textContent='';detected.className='detected';
+      authSection.classList.remove('visible');
       if(!c){btn.disabled=true;return}
 
       const proto=detectProtocol(c);
@@ -353,6 +390,12 @@ final class ProfileServer {
         detected.textContent='Detected: OpenVPN';detected.className='detected ovpn';
         if(!c.match(/remote\\s+/im)){showError("Missing 'remote' directive.");btn.disabled=true;return}
         if(!c.includes('<ca>')&&!/^ca\\s+/m.test(c)){showError("Missing CA certificate (<ca> block or ca directive).");btn.disabled=true;return}
+        if(needsAuth(c)){
+          authSection.classList.add('visible');
+          if(!usernameField.value.trim()||!passwordField.value.trim()){
+            btn.disabled=true;return;
+          }
+        }
       }else{
         showError("This doesn't look like a valid WireGuard or OpenVPN config file. Please check your file and try again.");
         btn.disabled=true;return;
@@ -366,6 +409,15 @@ final class ProfileServer {
     config.addEventListener('input',function(){
       configHidden.value=config.value;
       validate();
+    });
+
+    usernameField.addEventListener('input',validate);
+    passwordField.addEventListener('input',validate);
+
+    document.getElementById('pwToggle').addEventListener('click',function(){
+      const isHidden=passwordField.type==='password';
+      passwordField.type=isHidden?'text':'password';
+      this.textContent=isHidden?'\\u{1F648}':'\\u{1F441}';
     });
 
     file.addEventListener('change',function(){

@@ -60,8 +60,8 @@ private struct ScreenshotConnected: View {
         HStack(alignment: .top, spacing: 0) {
             // Left panel
             VStack(spacing: 20) {
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 80))
+                Text("Z")
+                    .font(.system(size: 100, weight: .bold, design: .rounded))
                     .foregroundStyle(accent)
                     .padding(.top, 40)
 
@@ -149,7 +149,7 @@ private struct ScreenshotConnected: View {
             Spacer()
 
             if profile.id == selectedID {
-                Text("ACTIVE")
+                Text("SELECTED")
                     .font(.caption2)
                     .fontWeight(.bold)
                     .foregroundStyle(accent)

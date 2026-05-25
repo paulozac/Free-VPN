@@ -59,6 +59,32 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         return nil
     }
 
+    /// Resolves a persistent Keychain reference to retrieve the stored password.
+    private static func loadPasswordFromKeychain(_ persistentRef: Data?) -> String? {
+        let log = Logger(subsystem: "com.zacvpn.zacvpn.PacketTunnel", category: "Keychain")
+        guard let persistentRef else {
+            log.warning("No passwordReference provided")
+            return nil
+        }
+
+        log.info("Resolving passwordReference (\(persistentRef.count) bytes)")
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecValuePersistentRef as String: persistentRef,
+            kSecReturnData as String: true
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else {
+            log.error("Failed to resolve passwordReference from Keychain: \(status)")
+            return nil
+        }
+        log.info("Password resolved from Keychain (\(data.count) bytes)")
+        return String(data: data, encoding: .utf8)
+    }
+
     // MARK: - WireGuard
 
     private func startWireGuardTunnel(providerConfig: [String: Any]) async throws {
@@ -90,6 +116,58 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         log.info("WireGuard tunnel started successfully")
     }
 
+    // MARK: - OpenVPN Config Sanitization
+
+    /// Strips or transforms directives unsupported by OpenVPN3/OpenVPNAdapter.
+    private static func sanitizeOpenVPNConfig(_ config: String) -> String {
+        let unsupportedPrefixes = [
+            "comp-lzo",
+            "fast-io",
+            "tun-mtu-extra",
+            "tun-mtu",
+            "mssfix",
+            "nobind",
+            "ping-restart",
+            "ping-timer-rem",
+            "remote-random",
+            "reneg-sec",
+            "resolv-retry",
+            "verify-x509-name",
+        ]
+
+        var lines = config.components(separatedBy: "\n")
+        var inBlock = false
+
+        lines = lines.compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let lower = trimmed.lowercased()
+
+            // Keep empty lines and comments
+            if trimmed.isEmpty || lower.hasPrefix("#") || lower.hasPrefix(";") {
+                return line
+            }
+
+            // Don't filter inside inline blocks (<ca>, <tls-crypt>, etc.)
+            if lower.hasPrefix("<") && !lower.hasPrefix("</") {
+                inBlock = true
+                return line
+            }
+            if lower.hasPrefix("</") {
+                inBlock = false
+                return line
+            }
+            if inBlock { return line }
+
+            if unsupportedPrefixes.contains(where: { lower.hasPrefix($0) }) {
+                return nil
+            }
+
+            return line
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - OpenVPN
 
     private func startOpenVPNTunnel(providerConfig: [String: Any]) async throws {
@@ -101,9 +179,33 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         log.info("OpenVPN config received (\(ovpnConfig.count) chars)")
         log.info("OpenVPN config preview: \(String(ovpnConfig.prefix(200)), privacy: .public)")
 
+        let sanitizedConfig = Self.sanitizeOpenVPNConfig(ovpnConfig)
+        log.info("Sanitized OpenVPN config (\(sanitizedConfig.count) chars):")
+        // Log sanitized config (excluding inline cert blocks) for debugging
+        for line in sanitizedConfig.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty && !trimmed.hasPrefix("-") && !trimmed.hasPrefix("MI") {
+                log.info("  \(trimmed, privacy: .public)")
+            }
+        }
+
         let configuration = OpenVPNConfiguration()
-        configuration.fileContent = ovpnConfig.data(using: .utf8)
-        configuration.tunPersist = true
+        configuration.fileContent = sanitizedConfig.data(using: .utf8)
+        configuration.tunPersist = false
+        configuration.compressionMode = .disabled
+        configuration.googleDNSFallback = true
+        configuration.connectionTimeout = 30
+        let lowerConfig = sanitizedConfig.lowercased()
+
+        // Force AES-CBC ciphersuite only when config explicitly uses CBC cipher
+        if lowerConfig.contains("cipher") && lowerConfig.contains("-cbc") {
+            configuration.forceCiphersuitesAESCBC = true
+        }
+
+        // Disable client certificate if config doesn't include <cert>/<key> blocks
+        if !lowerConfig.contains("<cert>") && !lowerConfig.contains("<key>") {
+            configuration.disableClientCert = true
+        }
 
         let evaluation: OpenVPNConfigurationEvaluation
         do {
@@ -118,9 +220,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         // Provide credentials if needed
         if !evaluation.autologin {
-            let username = providerConfig["username"] as? String ?? ""
-            let password = providerConfig["password"] as? String ?? ""
-            log.info("OpenVPN requires auth. username provided: \(!username.isEmpty)")
+            let proto = protocolConfiguration as? NETunnelProviderProtocol
+            let username = proto?.username ?? ""
+            let password = Self.loadPasswordFromKeychain(proto?.passwordReference) ?? ""
+            log.info("OpenVPN requires auth. username provided: \(!username.isEmpty), password provided: \(!password.isEmpty)")
             if !username.isEmpty {
                 let credentials = OpenVPNCredentials()
                 credentials.username = username
@@ -139,28 +242,27 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         log.info("Starting OpenVPN connection...")
 
         // Connect using async/await bridge with timeout
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    self.openVPNStartCompletion = { error in
-                        if let error = error {
-                            continuation.resume(throwing: error)
-                        } else {
-                            continuation.resume()
-                        }
-                    }
-                    self.openVPNAdapter.connect(using: self.packetFlow)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            var hasResumed = false
+
+            self.openVPNStartCompletion = { error in
+                guard !hasResumed else { return }
+                hasResumed = true
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
                 }
             }
 
-            group.addTask {
-                try await Task.sleep(nanoseconds: 30_000_000_000) // 30 second timeout
-                throw NEVPNError(.connectionFailed)
-            }
+            self.openVPNAdapter.connect(using: self.packetFlow)
 
-            // Wait for whichever finishes first
-            try await group.next()
-            group.cancelAll()
+            // Timeout after 30 seconds
+            DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
+                guard !hasResumed else { return }
+                hasResumed = true
+                continuation.resume(throwing: NEVPNError(.connectionFailed))
+            }
         }
 
         log.info("OpenVPN tunnel started successfully")
@@ -231,8 +333,12 @@ extension PacketTunnelProvider: OpenVPNAdapterDelegate {
     func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, handleError error: any Error) {
         let nsError = error as NSError
         let isFatal = nsError.userInfo[OpenVPNAdapterErrorFatalKey] as? Bool ?? false
+        let message = nsError.userInfo[OpenVPNAdapterErrorMessageKey] as? String ?? "none"
+        let reason = nsError.localizedFailureReason ?? "none"
         log.error("OpenVPN error (fatal=\(isFatal)): \(error.localizedDescription, privacy: .public)")
-        log.error("OpenVPN error details: \(nsError.domain) code=\(nsError.code) \(nsError.userInfo)")
+        log.error("OpenVPN error reason: \(reason, privacy: .public)")
+        log.error("OpenVPN error message: \(message, privacy: .public)")
+        log.error("OpenVPN error code: \(nsError.code)")
 
         if isFatal {
             log.error("Fatal OpenVPN error, failing connection")

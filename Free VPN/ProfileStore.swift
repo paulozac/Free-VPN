@@ -16,9 +16,15 @@ struct SavedProfile: Codable, Identifiable, Equatable {
     var endpoint: String?
     var address: String?
     var protocolType: VPNProtocolType?
+    var username: String?
+    var password: String?
 
     var vpnProtocol: VPNProtocolType {
         protocolType ?? .wireGuard
+    }
+
+    var requiresAuth: Bool {
+        vpnProtocol == .openVPN && OpenVPNConfig.requiresAuth(configString)
     }
 }
 
@@ -30,10 +36,8 @@ final class ProfileStore {
     var selectedProfileID: UUID?
 
     private let log = Logger(subsystem: "com.zacvpn.zacvpn", category: "ProfileStore")
-    private let fileURL: URL = {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return dir.appendingPathComponent("vpn_profiles.json")
-    }()
+    private let profilesKey = "savedProfiles"
+    private let selectedKey = "selectedProfileID"
 
     init() {
         load()
@@ -45,7 +49,7 @@ final class ProfileStore {
 
     /// Adds a new profile after validation. Returns an error message or nil on success.
     @discardableResult
-    func addProfile(name: String, configString: String) -> String? {
+    func addProfile(name: String, configString: String, username: String? = nil, password: String? = nil) -> String? {
         let detectedProtocol = VPNProtocolType.detect(from: configString)
 
         // Validate based on protocol type
@@ -83,7 +87,9 @@ final class ProfileStore {
             dateAdded: Date(),
             endpoint: endpoint,
             address: address,
-            protocolType: detectedProtocol
+            protocolType: detectedProtocol,
+            username: username,
+            password: password
         )
 
         profiles.append(profile)
@@ -116,17 +122,24 @@ final class ProfileStore {
         save()
     }
 
-    // MARK: - Persistence
+    func updateCredentials(_ profile: SavedProfile, username: String, password: String) {
+        guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
+        profiles[index].username = username.isEmpty ? nil : username
+        profiles[index].password = password.isEmpty ? nil : password
+        save()
+    }
+
+    // MARK: - Persistence (UserDefaults — reliable on tvOS unlike Documents directory)
 
     private func save() {
         do {
             let data = try JSONEncoder().encode(profiles)
-            try data.write(to: fileURL, options: .atomic)
+            UserDefaults.standard.set(data, forKey: profilesKey)
 
             if let id = selectedProfileID {
-                UserDefaults.standard.set(id.uuidString, forKey: "selectedProfileID")
+                UserDefaults.standard.set(id.uuidString, forKey: selectedKey)
             } else {
-                UserDefaults.standard.removeObject(forKey: "selectedProfileID")
+                UserDefaults.standard.removeObject(forKey: selectedKey)
             }
         } catch {
             log.error("Failed to save profiles: \(error.localizedDescription)")
@@ -134,13 +147,15 @@ final class ProfileStore {
     }
 
     private func load() {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        // Migrate from old file-based storage if needed
+        migrateFromFileIfNeeded()
+
+        guard let data = UserDefaults.standard.data(forKey: profilesKey) else { return }
 
         do {
-            let data = try Data(contentsOf: fileURL)
             profiles = try JSONDecoder().decode([SavedProfile].self, from: data)
 
-            if let idString = UserDefaults.standard.string(forKey: "selectedProfileID"),
+            if let idString = UserDefaults.standard.string(forKey: selectedKey),
                let id = UUID(uuidString: idString),
                profiles.contains(where: { $0.id == id }) {
                 selectedProfileID = id
@@ -149,6 +164,26 @@ final class ProfileStore {
             }
         } catch {
             log.error("Failed to load profiles: \(error.localizedDescription)")
+        }
+    }
+
+    /// One-time migration from the old Documents-directory JSON file to UserDefaults.
+    private func migrateFromFileIfNeeded() {
+        guard UserDefaults.standard.data(forKey: profilesKey) == nil else { return }
+
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let fileURL = dir.appendingPathComponent("vpn_profiles.json")
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        do {
+            let data = try Data(contentsOf: fileURL)
+            // Verify it decodes before storing
+            _ = try JSONDecoder().decode([SavedProfile].self, from: data)
+            UserDefaults.standard.set(data, forKey: profilesKey)
+            try? FileManager.default.removeItem(at: fileURL)
+            log.info("Migrated profiles from file to UserDefaults")
+        } catch {
+            log.error("Failed to migrate profiles from file: \(error.localizedDescription)")
         }
     }
 }

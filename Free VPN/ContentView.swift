@@ -23,6 +23,11 @@ struct ContentView: View {
     @State private var renamingProfile: SavedProfile?
     @State private var renameText = ""
     @State private var deletingProfile: SavedProfile?
+    @State private var editingCredentialsProfile: SavedProfile?
+    @State private var editUsername = ""
+    @State private var editPassword = ""
+    @State private var showPassword = false
+    @Namespace private var focusNamespace
 
     var body: some View {
         NavigationStack {
@@ -41,6 +46,15 @@ struct ContentView: View {
 
                     if vpnManager.connectionState == .connected {
                         VStack(spacing: 4) {
+                            if let selectedProfile = profileStore.profiles.first(where: { $0.id == profileStore.selectedProfileID }) {
+                                Text(selectedProfile.name)
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                Text(selectedProfile.vpnProtocol.displayName)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(Theme.accent)
+                            }
                             if let date = vpnManager.connectedDate {
                                 Text("Connected \(date, style: .relative) ago")
                                     .font(.caption)
@@ -56,25 +70,24 @@ struct ContentView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
+                            HStack(spacing: 12) {
+                                Label(VPNManager.formattedBytes(vpnManager.bytesIn), systemImage: "arrow.down.circle.fill")
+                                Label(VPNManager.formattedBytes(vpnManager.bytesOut), systemImage: "arrow.up.circle.fill")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
                         }
                     }
 
                     Spacer()
 
                     Button {
-                        vpnManager.toggleConnection()
-                    } label: {
-                        Text(connectButtonTitle)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .disabled(vpnManager.connectionState == .disconnecting)
-
-                    Button {
-                        profileServer.onProfileReceived = { name, config in
-                            let error = profileStore.addProfile(name: name, configString: config)
+                        profileServer.onProfileReceived = { name, config, username, password in
+                            let error = profileStore.addProfile(name: name, configString: config, username: username, password: password)
                             if error == nil, let profile = profileStore.profiles.last {
                                 profileStore.selectProfile(profile)
-                                applySelectedProfile()
+                                connectToProfile(profile)
                             }
                         }
                         profileServer.start()
@@ -83,6 +96,7 @@ struct ContentView: View {
                         Label("Upload Profile", systemImage: "plus.circle")
                             .frame(maxWidth: .infinity)
                     }
+                    .prefersDefaultFocus(profileStore.profiles.isEmpty, in: focusNamespace)
 
                     Spacer().frame(height: 20)
                 }
@@ -97,63 +111,100 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                         .padding(.top, 40)
 
-                    Text("Long press a profile to rename or delete")
+                    Text("Click on a profile to connect \u{2022} Long press to manage")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+
+                    if profileStore.profiles.isEmpty {
+                        VStack(spacing: 12) {
+                            Spacer()
+                            Image(systemName: "arrow.down.doc")
+                                .font(.system(size: 40))
+                                .foregroundStyle(Theme.accent)
+                            Text("Upload a VPN Profile to get started")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(Theme.accent)
+                                .multilineTextAlignment(.center)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
 
                     ScrollView {
                         VStack(spacing: 2) {
                             ForEach(profileStore.profiles) { profile in
+                                let isActive = isProfileActive(profile)
+                                let isTransitioning = isProfileTransitioning(profile)
+
                                 Button {
-                                    let wasConnected = vpnManager.connectionState == .connected || vpnManager.connectionState == .connecting
-                                    profileStore.selectProfile(profile)
-                                    if wasConnected {
-                                        reconnectWithProfile(profile)
-                                    } else {
-                                        applySelectedProfile()
-                                    }
+                                    handleProfileTap(profile)
                                 } label: {
                                     HStack {
-                                        Image(systemName: profile.id == profileStore.selectedProfileID ? "checkmark.circle.fill" : "circle")
-                                            .foregroundStyle(profile.id == profileStore.selectedProfileID ? Theme.accent : .secondary)
+                                        Image(systemName: isActive ? "checkmark.shield.fill" : isTransitioning ? "shield.fill" : "shield")
+                                            .foregroundStyle(isActive ? .white : isTransitioning ? .orange : .secondary)
+                                            .symbolEffect(.pulse, isActive: isTransitioning)
 
                                         VStack(alignment: .leading) {
                                             HStack(spacing: 6) {
                                                 Text(profile.name)
                                                     .font(.body)
+                                                    .foregroundStyle(isActive ? .white : .secondary)
                                                 Text(profile.vpnProtocol.shortName)
                                                     .font(.caption2)
                                                     .fontWeight(.semibold)
                                                     .padding(.horizontal, 6)
                                                     .padding(.vertical, 2)
-                                                    .background(profile.vpnProtocol == .wireGuard ? Theme.accent.opacity(0.2) : Color.orange.opacity(0.2))
-                                                    .foregroundStyle(profile.vpnProtocol == .wireGuard ? Theme.accent : .orange)
+                                                    .background(isActive ? Color.white.opacity(0.25) : profile.vpnProtocol == .wireGuard ? Theme.accent.opacity(0.2) : Color.orange.opacity(0.2))
+                                                    .foregroundStyle(isActive ? .white : profile.vpnProtocol == .wireGuard ? Theme.accent : .orange)
                                                     .clipShape(Capsule())
                                             }
-                                            if let endpoint = profile.endpoint {
+                                            if isActive {
+                                                Text("Click to disconnect")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.white.opacity(0.8))
+                                            } else if let endpoint = profile.endpoint {
                                                 Text(endpoint)
                                                     .font(.caption)
-                                                    .foregroundStyle(.secondary)
+                                                    .foregroundStyle(.tertiary)
                                             }
                                         }
 
                                         Spacer()
 
-                                        if profile.id == profileStore.selectedProfileID {
+                                        if isActive {
                                             Text("ACTIVE")
                                                 .font(.caption2)
                                                 .fontWeight(.bold)
-                                                .foregroundStyle(Theme.accent)
+                                                .foregroundStyle(.white)
+                                        } else if isTransitioning {
+                                            ProgressView()
                                         }
                                     }
                                     .padding(.horizontal)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(isActive ? Theme.accent : .clear)
+                                    )
                                 }
+                                .disabled(vpnManager.connectionState == .disconnecting)
+                                .prefersDefaultFocus(profile.id == profileStore.profiles.first?.id, in: focusNamespace)
                                 .contextMenu {
                                     Button {
                                         renameText = profile.name
                                         renamingProfile = profile
                                     } label: {
                                         Label("Rename", systemImage: "pencil")
+                                    }
+                                    if profile.requiresAuth {
+                                        Button {
+                                            editUsername = profile.username ?? ""
+                                            editPassword = profile.password ?? ""
+                                            editingCredentialsProfile = profile
+                                        } label: {
+                                            Label("Edit Credentials", systemImage: "person.badge.key")
+                                        }
                                     }
                                     Button(role: .destructive) {
                                         deletingProfile = profile
@@ -169,6 +220,7 @@ struct ContentView: View {
                 .containerRelativeFrame(.horizontal) { length, _ in length * 0.5 }
                 .padding(.trailing, 40)
             }
+            .focusScope(focusNamespace)
             .alert("Error", isPresented: .init(
                 get: { vpnManager.errorMessage != nil },
                 set: { if !$0 { vpnManager.errorMessage = nil } }
@@ -192,14 +244,80 @@ struct ContentView: View {
                     renamingProfile = nil
                 }
             }
+            .sheet(isPresented: .init(
+                get: { editingCredentialsProfile != nil },
+                set: { if !$0 { editingCredentialsProfile = nil; showPassword = false } }
+            )) {
+                NavigationStack {
+                    VStack(spacing: 24) {
+                        Text("Edit credentials for \"\(editingCredentialsProfile?.name ?? "")\"")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 20)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Username")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+                            TextField("Enter your VPN username", text: $editUsername)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Password")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+                            HStack {
+                                if showPassword {
+                                    TextField("Enter your VPN password", text: $editPassword)
+                                } else {
+                                    SecureField("Enter your VPN password", text: $editPassword)
+                                }
+                                Button {
+                                    showPassword.toggle()
+                                } label: {
+                                    Image(systemName: showPassword ? "eye.slash" : "eye")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+
+                        HStack(spacing: 20) {
+                            Button("Cancel", role: .cancel) {
+                                editingCredentialsProfile = nil
+                                showPassword = false
+                            }
+                            Button("Save") {
+                                if let profile = editingCredentialsProfile {
+                                    profileStore.updateCredentials(profile, username: editUsername, password: editPassword)
+                                    if isProfileActive(profile) {
+                                        connectToProfile(profileStore.profiles.first(where: { $0.id == profile.id }) ?? profile)
+                                    }
+                                }
+                                editingCredentialsProfile = nil
+                                showPassword = false
+                            }
+                        }
+                        .padding(.top, 12)
+
+                        Spacer()
+                    }
+                    .padding(40)
+                }
+            }
             .alert("Delete Profile", isPresented: .init(
                 get: { deletingProfile != nil },
                 set: { if !$0 { deletingProfile = nil } }
             )) {
                 Button("Delete", role: .destructive) {
                     if let profile = deletingProfile {
+                        let wasActive = isProfileActive(profile)
                         profileStore.removeProfile(profile)
-                        applySelectedProfile()
+                        if wasActive {
+                            vpnManager.disconnect()
+                        }
                     }
                     deletingProfile = nil
                 }
@@ -223,23 +341,42 @@ struct ContentView: View {
                 }
             }
         }
-        .onAppear {
-            applySelectedProfile()
-        }
     }
 
     // MARK: - Helpers
 
-    private func applySelectedProfile() {
-        guard let profile = profileStore.selectedProfile else { return }
-        Task {
-            await vpnManager.configure(with: profile.configString, protocolType: profile.vpnProtocol)
+    private func isProfileActive(_ profile: SavedProfile) -> Bool {
+        profile.id == profileStore.selectedProfileID && vpnManager.connectionState == .connected
+    }
+
+    private func isProfileTransitioning(_ profile: SavedProfile) -> Bool {
+        profile.id == profileStore.selectedProfileID && (vpnManager.connectionState == .connecting || vpnManager.connectionState == .reasserting)
+    }
+
+    private func handleProfileTap(_ profile: SavedProfile) {
+        if isProfileActive(profile) || isProfileTransitioning(profile) {
+            // Tapping the connected/connecting profile disconnects it
+            vpnManager.disconnect()
+        } else {
+            // Tapping any other profile: disconnect current, then connect new
+            profileStore.selectProfile(profile)
+            Task {
+                if vpnManager.connectionState == .connected || vpnManager.connectionState == .connecting || vpnManager.connectionState == .reasserting {
+                    await vpnManager.disconnectAndWait()
+                }
+                await vpnManager.configure(with: profile.configString, protocolType: profile.vpnProtocol, username: profile.username, password: profile.password)
+                vpnManager.connect()
+            }
         }
     }
 
-    private func reconnectWithProfile(_ profile: SavedProfile) {
+    private func connectToProfile(_ profile: SavedProfile) {
         Task {
-            await vpnManager.reconfigure(with: profile.configString, protocolType: profile.vpnProtocol)
+            if vpnManager.connectionState == .connected || vpnManager.connectionState == .connecting || vpnManager.connectionState == .reasserting {
+                await vpnManager.disconnectAndWait()
+            }
+            await vpnManager.configure(with: profile.configString, protocolType: profile.vpnProtocol, username: profile.username, password: profile.password)
+            vpnManager.connect()
         }
     }
 
@@ -256,15 +393,6 @@ struct ContentView: View {
         case .connected: Theme.accent
         case .connecting, .reasserting, .disconnecting: .orange
         case .disconnected, .invalid: .secondary
-        }
-    }
-
-    private var connectButtonTitle: String {
-        switch vpnManager.connectionState {
-        case .disconnected, .invalid: "Connect"
-        case .connecting: "Cancel"
-        case .connected, .reasserting: "Disconnect"
-        case .disconnecting: "Disconnecting..."
         }
     }
 }

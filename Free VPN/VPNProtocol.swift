@@ -89,6 +89,13 @@ enum OpenVPNConfig {
         return nil
     }
 
+    /// Checks if the OpenVPN config requires user/password authentication.
+    static func requiresAuth(_ configString: String) -> Bool {
+        configString.components(separatedBy: .newlines).contains {
+            $0.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("auth-user-pass")
+        }
+    }
+
     /// Returns a display name derived from the remote server.
     static func displayName(from configString: String) -> String {
         if let endpoint = extractEndpoint(from: configString) {

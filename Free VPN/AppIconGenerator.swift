@@ -24,13 +24,13 @@ struct AppIconView: View {
                     .foregroundStyle(.white.opacity(0.95))
                     .overlay(
                         Text("Z")
-                            .font(.system(size: 80, weight: .heavy, design: .default))
+                            .font(.system(size: 80, weight: .bold))
                             .foregroundStyle(Color(red: 0.03, green: 0.22, blue: 0.11))
                             .offset(y: 14)
                     )
 
                 // App name (Front layer)
-                Text("ZacVPN")
+                Text("Zac VPN Connect")
                     .font(.system(size: 60, weight: .bold))
                     .foregroundStyle(.white.opacity(0.95))
                     .tracking(2)
