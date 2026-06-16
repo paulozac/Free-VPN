@@ -32,6 +32,12 @@ struct WireGuardConfig {
 
 extension WireGuardConfig {
 
+    /// Appends a default CIDR suffix if missing (e.g. "10.0.0.1" → "10.0.0.1/32").
+    private static func normalizeCIDR(_ addr: String) -> String {
+        if addr.contains("/") { return addr }
+        return addr.contains(":") ? "\(addr)/128" : "\(addr)/32"
+    }
+
     /// Parses a standard WireGuard .conf file content into a WireGuardConfig.
     static func parse(from configString: String) throws -> WireGuardConfig {
         var interfaceConfig: InterfaceConfig?
@@ -110,7 +116,9 @@ extension WireGuardConfig {
                 case "privatekey":
                     privateKey = value
                 case "address":
-                    addresses = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                    addresses = value.split(separator: ",").map {
+                        normalizeCIDR($0.trimmingCharacters(in: .whitespaces))
+                    }
                 case "dns":
                     dnsServers = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
                 case "mtu":
@@ -129,7 +137,9 @@ extension WireGuardConfig {
                 case "endpoint":
                     currentPeerEndpoint = value
                 case "allowedips":
-                    currentPeerAllowedIPs = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                    currentPeerAllowedIPs = value.split(separator: ",").map {
+                        normalizeCIDR($0.trimmingCharacters(in: .whitespaces))
+                    }
                 case "persistentkeepalive":
                     currentPeerPersistentKeepalive = Int(value)
                 default:

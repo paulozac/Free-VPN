@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var editUsername = ""
     @State private var editPassword = ""
     @State private var showPassword = false
+    @State private var speedTest = SpeedTestManager()
     @Namespace private var focusNamespace
 
     var body: some View {
@@ -80,6 +81,75 @@ struct ContentView: View {
                         }
                     }
 
+                    // Speed Test Results
+                    if speedTest.state != .idle {
+                        VStack(spacing: 6) {
+                            if speedTest.isRunning {
+                                ProgressView(value: speedTest.progress)
+                                    .tint(Theme.accent)
+                                Text(speedTestPhaseText)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            if let ip = speedTest.testServerIP {
+                                HStack {
+                                    Image(systemName: "globe")
+                                        .foregroundStyle(.green)
+                                    Text("Test Server")
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        if let hostname = speedTest.testServerHostname {
+                                            Text(hostname)
+                                                .fontWeight(.semibold)
+                                        }
+                                        Text(ip)
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
+                                .font(.caption)
+                            }
+                            speedTestRow("Latency", icon: "clock.fill", color: .cyan,
+                                         primary: speedTest.minLatencyMs, average: speedTest.latencyMs,
+                                         unit: "ms", decimals: 0)
+                            speedTestRow("Download", icon: "arrow.down.circle.fill", color: .blue,
+                                         primary: speedTest.peakDownloadMbps, average: speedTest.downloadMbps,
+                                         unit: "Mbps", decimals: 1)
+                            speedTestRow("Upload", icon: "arrow.up.circle.fill", color: .purple,
+                                         primary: speedTest.peakUploadMbps, average: speedTest.uploadMbps,
+                                         unit: "Mbps", decimals: 1)
+                            if case .error(let msg) = speedTest.state {
+                                Text(msg)
+                                    .font(.caption2)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                    }
+
+                    Spacer().frame(height: 8)
+
+                    Button {
+                        if speedTest.isRunning {
+                            speedTest.cancel()
+                        } else {
+                            speedTest.startTest()
+                        }
+                    } label: {
+                        Label(speedTest.isRunning ? "Cancel" : "Speed Test", systemImage: speedTest.isRunning ? "xmark.circle" : "speedometer")
+                            .font(.callout)
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+
+                    Text("Powered by Cloudflare \u{2601}")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+
                     Spacer()
 
                     Button {
@@ -96,8 +166,6 @@ struct ContentView: View {
                         Label("Upload Profile", systemImage: "plus.circle")
                             .frame(maxWidth: .infinity)
                     }
-                    .prefersDefaultFocus(profileStore.profiles.isEmpty, in: focusNamespace)
-
                     Spacer().frame(height: 20)
                 }
                 .focusSection()
@@ -189,7 +257,7 @@ struct ContentView: View {
                                     )
                                 }
                                 .disabled(vpnManager.connectionState == .disconnecting)
-                                .prefersDefaultFocus(profile.id == profileStore.profiles.first?.id, in: focusNamespace)
+                                .prefersDefaultFocus(profile.id == defaultFocusProfileID, in: focusNamespace)
                                 .contextMenu {
                                     Button {
                                         renameText = profile.name
@@ -217,6 +285,7 @@ struct ContentView: View {
                     }
                 }
                 .focusSection()
+                .prefersDefaultFocus(in: focusNamespace)
                 .containerRelativeFrame(.horizontal) { length, _ in length * 0.5 }
                 .padding(.trailing, 40)
             }
@@ -345,6 +414,13 @@ struct ContentView: View {
 
     // MARK: - Helpers
 
+    private var defaultFocusProfileID: UUID? {
+        if vpnManager.isActiveOrTransitioning, let selectedID = profileStore.selectedProfileID {
+            return selectedID
+        }
+        return profileStore.profiles.first?.id
+    }
+
     private func isProfileActive(_ profile: SavedProfile) -> Bool {
         profile.id == profileStore.selectedProfileID && vpnManager.connectionState == .connected
     }
@@ -355,28 +431,47 @@ struct ContentView: View {
 
     private func handleProfileTap(_ profile: SavedProfile) {
         if isProfileActive(profile) || isProfileTransitioning(profile) {
-            // Tapping the connected/connecting profile disconnects it
             vpnManager.disconnect()
+            speedTest.reset()
         } else {
-            // Tapping any other profile: disconnect current, then connect new
             profileStore.selectProfile(profile)
-            Task {
-                if vpnManager.connectionState == .connected || vpnManager.connectionState == .connecting || vpnManager.connectionState == .reasserting {
-                    await vpnManager.disconnectAndWait()
-                }
-                await vpnManager.configure(with: profile.configString, protocolType: profile.vpnProtocol, username: profile.username, password: profile.password)
-                vpnManager.connect()
-            }
+            speedTest.reset()
+            connectToProfile(profile)
         }
     }
 
     private func connectToProfile(_ profile: SavedProfile) {
         Task {
-            if vpnManager.connectionState == .connected || vpnManager.connectionState == .connecting || vpnManager.connectionState == .reasserting {
+            if vpnManager.isActiveOrTransitioning {
                 await vpnManager.disconnectAndWait()
             }
             await vpnManager.configure(with: profile.configString, protocolType: profile.vpnProtocol, username: profile.username, password: profile.password)
             vpnManager.connect()
+        }
+    }
+
+    @ViewBuilder
+    private func speedTestRow(_ label: String, icon: String, color: Color,
+                              primary: Double?, average: Double?,
+                              unit: String, decimals: Int) -> some View {
+        if let value = primary {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundStyle(color)
+                Text(label)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(String(format: "%.\(decimals)f \(unit)", value))
+                        .fontWeight(.semibold)
+                    if let avg = average {
+                        Text(String(format: "Avg: %.\(decimals)f \(unit)", avg))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .font(.caption)
         }
     }
 
@@ -385,6 +480,15 @@ struct ContentView: View {
         case .connected: "lock.shield.fill"
         case .connecting, .reasserting, .disconnecting: "shield.fill"
         case .disconnected, .invalid: "shield.slash.fill"
+        }
+    }
+
+    private var speedTestPhaseText: String {
+        switch speedTest.state {
+        case .testingLatency: "Measuring latency..."
+        case .testingDownload: "Testing download speed..."
+        case .testingUpload: "Testing upload speed..."
+        default: ""
         }
     }
 

@@ -77,7 +77,7 @@ final class VPNManager {
 
     /// Disconnects and waits until the tunnel is fully disconnected before returning.
     func disconnectAndWait() async {
-        guard connectionState == .connected || connectionState == .connecting || connectionState == .reasserting else { return }
+        guard isActiveOrTransitioning else { return }
         disconnect()
         // Wait for disconnected state (up to 5 seconds)
         for _ in 0..<50 {
@@ -102,7 +102,7 @@ final class VPNManager {
     }
 
     func reconfigure(with configString: String, protocolType: VPNProtocolType = .wireGuard, username: String? = nil, password: String? = nil) async {
-        let wasConnected = connectionState == .connected || connectionState == .connecting || connectionState == .reasserting
+        let wasConnected = isActiveOrTransitioning
         if wasConnected {
             disconnect()
         }
@@ -114,6 +114,10 @@ final class VPNManager {
 
     var isConfigured: Bool {
         tunnelManager != nil && connectionState != .invalid
+    }
+
+    var isActiveOrTransitioning: Bool {
+        connectionState == .connected || connectionState == .connecting || connectionState == .reasserting
     }
 
     // MARK: - WireGuard Configuration
@@ -133,23 +137,9 @@ final class VPNManager {
             serverAddress = endpoint
         }
 
-        // Replace 0.0.0.0/0 with 0.0.0.0/1 + 128.0.0.0/1 to keep local network accessible
-        var configToSave = config
-        for i in configToSave.peers.indices {
-            let allowedIPs = configToSave.peers[i].allowedIPs
-            if allowedIPs.contains("0.0.0.0/0") {
-                configToSave.peers[i].allowedIPs = [
-                    "0.0.0.0/1", "128.0.0.0/1"
-                ]
-                if allowedIPs.contains("::/0") {
-                    configToSave.peers[i].allowedIPs.append("::/0")
-                }
-            }
-        }
-
         let providerConfig: [String: Any] = [
             "protocolType": VPNProtocolType.wireGuard.rawValue,
-            "wgQuickConfig": configToSave.toWgQuickConfig()
+            "wgQuickConfig": config.toWgQuickConfig()
         ]
 
         await saveTunnelConfiguration(
@@ -330,14 +320,22 @@ final class VPNManager {
 
     // MARK: - Traffic Stats
 
+    private var baselineIn: UInt64 = 0
+    private var baselineOut: UInt64 = 0
+
     private func startStatsPolling() {
         stopStatsPolling()
+        let baseline = Self.readTunnelInterfaceStats()
+        baselineIn = baseline.bytesIn
+        baselineOut = baseline.bytesOut
+        bytesIn = 0
+        bytesOut = 0
         statsTask = Task {
             while !Task.isCancelled {
                 let stats = Self.readTunnelInterfaceStats()
-                bytesIn = stats.bytesIn
-                bytesOut = stats.bytesOut
-                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                bytesIn = stats.bytesIn >= baselineIn ? stats.bytesIn - baselineIn : stats.bytesIn
+                bytesOut = stats.bytesOut >= baselineOut ? stats.bytesOut - baselineOut : stats.bytesOut
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
     }
@@ -432,6 +430,9 @@ final class VPNManager {
             startStatsPolling()
         case .reasserting:
             connectionState = .reasserting
+            bytesIn = 0
+            bytesOut = 0
+            stopStatsPolling()
         case .disconnecting:
             connectionState = .disconnecting
         @unknown default:
