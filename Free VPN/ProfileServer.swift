@@ -316,7 +316,7 @@ final class ProfileServer {
     <label class="field" for="name">Profile Name (optional)</label>
     <input type="text" name="name" id="name" placeholder="e.g. Home Server, US East, Work VPN">
     <label class="file-label" for="file" id="fileLabel">&#128193; Choose VPN config file</label>
-    <input type="file" id="file">
+    <input type="file" id="file" accept=".conf,.ovpn,.txt,text/*,application/octet-stream">
     <div class="file-name" id="fileName"></div>
     <div class="detected" id="detected"></div>
     <div class="auth-section" id="authSection">

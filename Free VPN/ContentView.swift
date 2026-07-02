@@ -13,6 +13,13 @@ private enum Theme {
     static let accent = Color(red: 0.13, green: 0.69, blue: 0.34)
 }
 
+private struct ScrollContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 // MARK: - Main View
 
 struct ContentView: View {
@@ -28,7 +35,10 @@ struct ContentView: View {
     @State private var editPassword = ""
     @State private var showPassword = false
     @State private var speedTest = SpeedTestManager()
+    @FocusState private var focusedProfileID: UUID?
     @Namespace private var focusNamespace
+    @State private var profileContentHeight: CGFloat = 0
+    @State private var profileScrollHeight: CGFloat = 0
 
     var body: some View {
         NavigationStack {
@@ -227,7 +237,7 @@ struct ContentView: View {
                     }
 
                     ScrollView {
-                        VStack(spacing: 2) {
+                        VStack(spacing: 8) {
                             ForEach(profileStore.profiles) { profile in
                                 let isActive = isProfileActive(profile)
                                 let isTransitioning = isProfileTransitioning(profile)
@@ -261,7 +271,7 @@ struct ContentView: View {
                                             } else if let endpoint = profile.endpoint {
                                                 Text(endpoint)
                                                     .font(.caption)
-                                                    .foregroundStyle(.tertiary)
+                                                    .foregroundStyle(.secondary)
                                             }
                                         }
 
@@ -278,12 +288,15 @@ struct ContentView: View {
                                     }
                                     .padding(.horizontal)
                                     .padding(.vertical, 4)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(isActive ? Theme.accent : .clear)
-                                    )
+                                    .background {
+                                        if isActive {
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(Theme.accent)
+                                        }
+                                    }
                                 }
                                 .disabled(vpnManager.connectionState == .disconnecting)
+                                .focused($focusedProfileID, equals: profile.id)
                                 .prefersDefaultFocus(profile.id == defaultFocusProfileID, in: focusNamespace)
                                 .contextMenu {
                                     Button {
@@ -309,6 +322,27 @@ struct ContentView: View {
                                 }
                             }
                         }
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(key: ScrollContentHeightKey.self, value: proxy.size.height)
+                            }
+                        )
+                    }
+                    .onPreferenceChange(ScrollContentHeightKey.self) { profileContentHeight = $0 }
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.onAppear { profileScrollHeight = proxy.size.height }
+                        }
+                    )
+
+                    if showMoreIndicator {
+                        HStack(spacing: 6) {
+                            Image(systemName: "chevron.down")
+                            Text("\(profileStore.profiles.count) profiles")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 4)
                     }
                 }
                 .focusSection()
@@ -440,6 +474,16 @@ struct ContentView: View {
     }
 
     // MARK: - Helpers
+
+    private var showMoreIndicator: Bool {
+        guard profileContentHeight > profileScrollHeight + 1 else { return false }
+        if let focusedID = focusedProfileID,
+           let index = profileStore.profiles.firstIndex(where: { $0.id == focusedID }),
+           index >= profileStore.profiles.count - 2 {
+            return false
+        }
+        return true
+    }
 
     private var defaultFocusProfileID: UUID? {
         if vpnManager.isActiveOrTransitioning, let selectedID = profileStore.selectedProfileID {
