@@ -30,6 +30,26 @@ final class VPNManager {
     private(set) var bytesIn: UInt64 = 0
     private(set) var bytesOut: UInt64 = 0
     var errorMessage: String?
+    private(set) var connectionLog: [String] = []
+    private let maxConnectionLogLines = 20
+    private static let logDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
+    private func appendConnectionLog(_ message: String) {
+        let timestamp = Self.logDateFormatter.string(from: Date())
+        connectionLog.append("[\(timestamp)] \(message)")
+        if connectionLog.count > maxConnectionLogLines {
+            connectionLog.removeFirst(connectionLog.count - maxConnectionLogLines)
+        }
+    }
+
+    private func setErrorMessage(_ message: String) {
+        errorMessage = message
+        appendConnectionLog("ERROR: \(message)")
+    }
 
     private let log = Logger(subsystem: "com.zacvpn.zacvpn", category: "VPNManager")
     private var tunnelManager: NETunnelProviderManager?
@@ -48,6 +68,7 @@ final class VPNManager {
 
     func configure(with configString: String, protocolType: VPNProtocolType = .wireGuard, username: String? = nil, password: String? = nil) async {
         errorMessage = nil
+        appendConnectionLog("Configuring VPN (\(protocolType.displayName))")
         log.info("Configuring VPN (\(protocolType.displayName)) with config (\(configString.count) chars)")
 
         switch protocolType {
@@ -60,18 +81,20 @@ final class VPNManager {
 
     func connect() {
         guard let tunnelManager else {
-            errorMessage = "VPN not configured. Add a profile first."
+            setErrorMessage("VPN not configured. Add a profile first.")
             return
         }
 
         do {
+            appendConnectionLog("Starting VPN tunnel")
             try tunnelManager.connection.startVPNTunnel()
         } catch {
-            errorMessage = "Failed to start VPN: \(error.localizedDescription)"
+            setErrorMessage("Failed to start VPN: \(error.localizedDescription)")
         }
     }
 
     func disconnect() {
+        appendConnectionLog("Stopping VPN tunnel")
         tunnelManager?.connection.stopVPNTunnel()
     }
 
@@ -91,7 +114,7 @@ final class VPNManager {
     func toggleConnection() {
         switch connectionState {
         case .invalid:
-            errorMessage = "VPN not configured. Upload a profile first."
+            setErrorMessage("VPN not configured. Upload a profile first.")
         case .disconnected:
             connect()
         case .connected, .connecting, .reasserting:
@@ -193,7 +216,7 @@ final class VPNManager {
             }
         } catch {
             log.error("Failed to load VPN configuration: \(error.localizedDescription)")
-            errorMessage = "Failed to load VPN configuration: \(error.localizedDescription)"
+            setErrorMessage("Failed to load VPN configuration: \(error.localizedDescription)")
         }
     }
 
@@ -228,10 +251,11 @@ final class VPNManager {
             observeStatus()
             updateConnectionState()
             log.info("VPN configured successfully, state: \(self.connectionState.rawValue)")
+            appendConnectionLog("VPN configured successfully, state: \(self.connectionState.rawValue)")
             errorMessage = nil
         } catch let nsError as NSError {
             log.error("Failed to save VPN config: domain=\(nsError.domain) code=\(nsError.code) \(nsError.localizedDescription)")
-            errorMessage = "Failed to save VPN: \(nsError.localizedDescription) (code \(nsError.code))"
+            setErrorMessage("Failed to save VPN: \(nsError.localizedDescription) (code \(nsError.code))")
         }
     }
 
@@ -410,6 +434,7 @@ final class VPNManager {
             return
         }
 
+        let previousState = connectionState
         switch status {
         case .invalid:
             connectionState = .invalid
@@ -421,6 +446,12 @@ final class VPNManager {
             bytesIn = 0
             bytesOut = 0
             stopStatsPolling()
+            if let error = tunnelManager?.connection.error {
+                appendConnectionLog("VPN disconnected with error: \(error.localizedDescription)")
+                if errorMessage == nil {
+                    errorMessage = error.localizedDescription
+                }
+            }
         case .connecting:
             connectionState = .connecting
         case .connected:
@@ -437,6 +468,9 @@ final class VPNManager {
             connectionState = .disconnecting
         @unknown default:
             connectionState = .disconnected
+        }
+        if connectionState != previousState {
+            appendConnectionLog("VPN state changed to \(connectionState.rawValue)")
         }
     }
 }

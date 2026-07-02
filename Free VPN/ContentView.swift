@@ -129,6 +129,33 @@ struct ContentView: View {
                         .padding(.horizontal, 8)
                     }
 
+                    if !vpnManager.connectionLog.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Recent Logs")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+
+                            ScrollView(.vertical, showsIndicators: true) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(vpnManager.connectionLog, id: \.self) { line in
+                                        Text(line)
+                                            .font(.caption2)
+                                            .fontDesign(.monospaced)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: 140)
+                            .padding(10)
+                            .background(Color(red: 0.96, green: 0.97, blue: 1.0))
+                            .cornerRadius(12)
+                        }
+                    }
+
                     Spacer().frame(height: 8)
 
                     Button {

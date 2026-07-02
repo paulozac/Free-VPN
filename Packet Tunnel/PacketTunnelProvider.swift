@@ -168,6 +168,39 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         return lines.joined(separator: "\n")
     }
 
+    private static func extractTransportProtocol(from config: String) -> OpenVPNTransportProtocol? {
+        for line in config.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let lower = trimmed.lowercased()
+
+            if lower.hasPrefix("proto ") {
+                let components = lower.split(separator: " ", maxSplits: 1)
+                guard components.count == 2 else { continue }
+                let proto = components[1].trimmingCharacters(in: .whitespaces)
+                switch proto {
+                case "udp": return .udp
+                case "tcp", "tcp-client", "tcp-server": return .tcp
+                case "adaptive": return .adaptive
+                default: return nil
+                }
+            }
+
+            if lower.hasPrefix("remote ") {
+                let components = lower.split(separator: " ")
+                if components.count >= 4 {
+                    let protoToken = components[3].trimmingCharacters(in: .whitespaces)
+                    switch protoToken {
+                    case "udp", "udp4", "udp6": return .udp
+                    case "tcp", "tcp-client", "tcp-server": return .tcp
+                    case "adaptive": return .adaptive
+                    default: break
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
     // MARK: - OpenVPN
 
     private func startOpenVPNTunnel(providerConfig: [String: Any]) async throws {
@@ -190,6 +223,17 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         let configuration = OpenVPNConfiguration()
+        if let transportProtocol = Self.extractTransportProtocol(from: sanitizedConfig) {
+            configuration.proto = transportProtocol
+            let protoName: String
+            switch transportProtocol {
+            case .udp: protoName = "udp"
+            case .tcp: protoName = "tcp"
+            case .adaptive: protoName = "adaptive"
+            default: protoName = "default"
+            }
+            log.info("OpenVPN transport protocol override: \(protoName, privacy: .public)")
+        }
         configuration.fileContent = sanitizedConfig.data(using: .utf8)
         configuration.tunPersist = false
         configuration.compressionMode = .disabled
