@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import CoreImage.CIFilterBuiltins
 
 // MARK: - Theme
 
@@ -23,10 +24,10 @@ private struct ScrollContentHeightKey: PreferenceKey {
 // MARK: - Main View
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var vpnManager = VPNManager()
     @State private var profileStore = ProfileStore()
     @State private var profileServer = ProfileServer()
-    @State private var showingUpload = false
     @State private var renamingProfile: SavedProfile?
     @State private var renameText = ""
     @State private var deletingProfile: SavedProfile?
@@ -34,6 +35,7 @@ struct ContentView: View {
     @State private var editUsername = ""
     @State private var editPassword = ""
     @State private var showPassword = false
+    @State private var showingLogs = false
     @State private var speedTest = SpeedTestManager()
     @FocusState private var focusedProfileID: UUID?
     @Namespace private var focusNamespace
@@ -45,11 +47,29 @@ struct ContentView: View {
             HStack(alignment: .top, spacing: 0) {
                 // Left: Status + Controls
                 VStack(spacing: 20) {
-                    Image(systemName: statusIconName)
-                        .font(.system(size: 80))
-                        .foregroundStyle(statusIconColor)
-                        .symbolEffect(.pulse, isActive: vpnManager.connectionState == .connecting || vpnManager.connectionState == .disconnecting || vpnManager.connectionState == .reasserting)
-                        .padding(.top, 40)
+                    Group {
+                        if vpnManager.connectionState == .connected {
+                            ZStack {
+                                Text("Z")
+                                    .font(.system(size: 80, weight: .black, design: .rounded))
+                                    .foregroundStyle(Theme.accent)
+                                Image(systemName: "lock.fill")
+                                    .font(.system(size: 22, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(8)
+                                    .background(Theme.accent)
+                                    .clipShape(Circle())
+                                    .offset(x: 34, y: -30)
+                            }
+                        } else {
+                            Image(systemName: statusIconName)
+                                .font(.system(size: 80))
+                                .foregroundStyle(statusIconColor)
+                                .symbolEffect(.pulse, isActive: vpnManager.connectionState == .connecting || vpnManager.connectionState == .disconnecting || vpnManager.connectionState == .reasserting)
+                        }
+                    }
+                    .frame(height: 90)
+                    .padding(.top, 40)
 
                     Text(vpnManager.connectionState.rawValue)
                         .font(.title2)
@@ -139,33 +159,6 @@ struct ContentView: View {
                         .padding(.horizontal, 8)
                     }
 
-                    if !vpnManager.connectionLog.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Recent Logs")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .textCase(.uppercase)
-
-                            ScrollView(.vertical, showsIndicators: true) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ForEach(vpnManager.connectionLog, id: \.self) { line in
-                                        Text(line)
-                                            .font(.caption2)
-                                            .fontDesign(.monospaced)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                            .multilineTextAlignment(.leading)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .frame(maxHeight: 140)
-                            .padding(10)
-                            .background(Color(red: 0.96, green: 0.97, blue: 1.0))
-                            .cornerRadius(12)
-                        }
-                    }
-
                     Spacer().frame(height: 8)
 
                     Button {
@@ -189,19 +182,33 @@ struct ContentView: View {
 
                     Spacer()
 
-                    Button {
-                        profileServer.onProfileReceived = { name, config, username, password in
-                            let error = profileStore.addProfile(name: name, configString: config, username: username, password: password)
-                            if error == nil, let profile = profileStore.profiles.last {
-                                profileStore.selectProfile(profile)
-                                connectToProfile(profile)
+                    // Inline QR code for profile upload
+                    if let url = profileServer.localURL {
+                        VStack(spacing: 8) {
+                            Text("Upload Profile")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+
+                            if let image = generateQRCode(from: url) {
+                                Image(uiImage: image)
+                                    .interpolation(.none)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 160, height: 160)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
+
+                            Text(url)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.blue)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
                         }
-                        profileServer.start()
-                        showingUpload = true
-                    } label: {
-                        Label("Upload Profile", systemImage: "plus.circle")
-                            .frame(maxWidth: .infinity)
+                    } else {
+                        ProgressView("Starting Profile Upload Server...")
+                            .font(.caption2)
                     }
                     Spacer().frame(height: 20)
                 }
@@ -216,7 +223,7 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                         .padding(.top, 40)
 
-                    Text("Click on a profile to connect \u{2022} Long press to manage")
+                    Text("Click on a profile to connect \u{2022} Long press to manage or see logs")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
 
@@ -313,6 +320,11 @@ struct ContentView: View {
                                         } label: {
                                             Label("Edit Credentials", systemImage: "person.badge.key")
                                         }
+                                    }
+                                    Button {
+                                        showingLogs = true
+                                    } label: {
+                                        Label("Show Logs", systemImage: "doc.text.magnifyingglass")
                                     }
                                     Button(role: .destructive) {
                                         deletingProfile = profile
@@ -457,20 +469,77 @@ struct ContentView: View {
             } message: {
                 Text("Are you sure you want to delete \"\(deletingProfile?.name ?? "")\"?")
             }
-            .sheet(isPresented: $showingUpload, onDismiss: {
-                profileServer.stop()
-            }) {
+            .sheet(isPresented: $showingLogs) {
                 NavigationStack {
-                    if let url = profileServer.localURL {
-                        QRCodeView(url: url) {
-                            showingUpload = false
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 2) {
+                                if vpnManager.connectionLog.isEmpty {
+                                    Text("No logs yet. Connect to a VPN profile to see activity.")
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.top, 40)
+                                } else {
+                                    ForEach(Array(vpnManager.connectionLog.enumerated()), id: \.offset) { index, line in
+                                        Text(line)
+                                            .font(.system(.body, design: .monospaced))
+                                            .foregroundStyle(line.contains("ERROR") ? .red : line.contains("State:") ? .primary : .secondary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .id(index)
+                                    }
+                                }
+                            }
+                            .padding(32)
                         }
-                    } else {
-                        ProgressView("Starting server...")
+                        .onChange(of: vpnManager.connectionLog.count) {
+                            if let last = vpnManager.connectionLog.indices.last {
+                                withAnimation {
+                                    proxy.scrollTo(last, anchor: .bottom)
+                                }
+                            }
+                        }
+                        .onAppear {
+                            if let last = vpnManager.connectionLog.indices.last {
+                                proxy.scrollTo(last, anchor: .bottom)
+                            }
+                        }
                     }
+                    .navigationTitle("Connection Logs")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") { showingLogs = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Text("\(vpnManager.connectionLog.count) entries")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .presentationDetents([.large])
+            }
+            .onAppear {
+                startServer()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    startServer()
+                } else {
+                    profileServer.stop()
                 }
             }
         }
+    }
+
+    private func startServer() {
+        profileServer.onProfileReceived = { name, config, username, password in
+            let error = profileStore.addProfile(name: name, configString: config, username: username, password: password)
+            if error == nil, let profile = profileStore.profiles.last {
+                profileStore.selectProfile(profile)
+                connectToProfile(profile)
+            }
+        }
+        profileServer.start()
     }
 
     // MARK: - Helpers
@@ -544,6 +613,18 @@ struct ContentView: View {
             }
             .font(.caption)
         }
+    }
+
+    private func generateQRCode(from string: String) -> UIImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(string.utf8)
+        filter.correctionLevel = "M"
+        guard let ciImage = filter.outputImage else { return nil }
+        let scale = 10.0
+        let transformed = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(transformed, from: transformed.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 
     private var statusIconName: String {

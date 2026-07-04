@@ -31,7 +31,7 @@ final class VPNManager {
     private(set) var bytesOut: UInt64 = 0
     var errorMessage: String?
     private(set) var connectionLog: [String] = []
-    private let maxConnectionLogLines = 20
+    private let maxConnectionLogLines = 200
     private static let logDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
@@ -68,7 +68,10 @@ final class VPNManager {
 
     func configure(with configString: String, protocolType: VPNProtocolType = .wireGuard, username: String? = nil, password: String? = nil) async {
         errorMessage = nil
-        appendConnectionLog("Configuring VPN (\(protocolType.displayName))")
+        appendConnectionLog("Configuring VPN (\(protocolType.displayName)), config: \(configString.count) chars")
+        if let username, !username.isEmpty {
+            appendConnectionLog("Credentials: username provided")
+        }
         log.info("Configuring VPN (\(protocolType.displayName)) with config (\(configString.count) chars)")
 
         switch protocolType {
@@ -86,15 +89,20 @@ final class VPNManager {
         }
 
         do {
-            appendConnectionLog("Starting VPN tunnel")
+            let proto = tunnelManager.protocolConfiguration as? NETunnelProviderProtocol
+            appendConnectionLog("Starting VPN tunnel to \(proto?.serverAddress ?? "unknown")")
+            appendConnectionLog("Bundle: \(proto?.providerBundleIdentifier ?? "nil")")
             try tunnelManager.connection.startVPNTunnel()
+            appendConnectionLog("startVPNTunnel() called successfully")
+        } catch let error as NEVPNError {
+            setErrorMessage("VPN error (\(error.code.rawValue)): \(error.localizedDescription)")
         } catch {
             setErrorMessage("Failed to start VPN: \(error.localizedDescription)")
         }
     }
 
     func disconnect() {
-        appendConnectionLog("Stopping VPN tunnel")
+        appendConnectionLog("Requesting VPN tunnel stop")
         tunnelManager?.connection.stopVPNTunnel()
     }
 
@@ -149,15 +157,17 @@ final class VPNManager {
         let config: WireGuardConfig
         do {
             config = try WireGuardConfig.parse(from: configString)
+            appendConnectionLog("Parsed WireGuard config: \(config.peers.count) peer(s), address=\(config.interface.address)")
             log.info("Parsed WireGuard config: interface address=\(config.interface.address), peers=\(config.peers.count)")
         } catch {
             log.error("Failed to parse WireGuard config: \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
+            setErrorMessage("WireGuard parse error: \(error.localizedDescription)")
             return
         }
 
         if let endpoint = config.peers.first?.endpoint {
             serverAddress = endpoint
+            appendConnectionLog("Endpoint: \(endpoint)")
         }
 
         let providerConfig: [String: Any] = [
@@ -176,6 +186,7 @@ final class VPNManager {
     private func configureOpenVPN(configString: String, username: String? = nil, password: String? = nil) async {
         let endpoint = OpenVPNConfig.extractEndpoint(from: configString)
         serverAddress = endpoint
+        appendConnectionLog("OpenVPN endpoint: \(endpoint ?? "unknown")")
 
         let providerConfig: [String: Any] = [
             "protocolType": VPNProtocolType.openVPN.rawValue,
@@ -346,19 +357,24 @@ final class VPNManager {
 
     private var baselineIn: UInt64 = 0
     private var baselineOut: UInt64 = 0
+    private var accumulatedIn: UInt64 = 0
+    private var accumulatedOut: UInt64 = 0
 
     private func startStatsPolling() {
         stopStatsPolling()
+        // Preserve current totals as accumulated offset across polling restarts
+        accumulatedIn = bytesIn
+        accumulatedOut = bytesOut
         let baseline = Self.readTunnelInterfaceStats()
         baselineIn = baseline.bytesIn
         baselineOut = baseline.bytesOut
-        bytesIn = 0
-        bytesOut = 0
         statsTask = Task {
             while !Task.isCancelled {
                 let stats = Self.readTunnelInterfaceStats()
-                bytesIn = stats.bytesIn >= baselineIn ? stats.bytesIn - baselineIn : stats.bytesIn
-                bytesOut = stats.bytesOut >= baselineOut ? stats.bytesOut - baselineOut : stats.bytesOut
+                let deltaIn = stats.bytesIn >= baselineIn ? stats.bytesIn - baselineIn : stats.bytesIn
+                let deltaOut = stats.bytesOut >= baselineOut ? stats.bytesOut - baselineOut : stats.bytesOut
+                bytesIn = accumulatedIn + deltaIn
+                bytesOut = accumulatedOut + deltaOut
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
@@ -445,13 +461,10 @@ final class VPNManager {
             serverIP = nil
             bytesIn = 0
             bytesOut = 0
+            accumulatedIn = 0
+            accumulatedOut = 0
             stopStatsPolling()
-            if let error = tunnelManager?.connection.error {
-                appendConnectionLog("VPN disconnected with error: \(error.localizedDescription)")
-                if errorMessage == nil {
-                    errorMessage = error.localizedDescription
-                }
-            }
+            connectionLog.removeAll()
         case .connecting:
             connectionState = .connecting
         case .connected:
@@ -461,8 +474,6 @@ final class VPNManager {
             startStatsPolling()
         case .reasserting:
             connectionState = .reasserting
-            bytesIn = 0
-            bytesOut = 0
             stopStatsPolling()
         case .disconnecting:
             connectionState = .disconnecting
@@ -470,7 +481,10 @@ final class VPNManager {
             connectionState = .disconnected
         }
         if connectionState != previousState {
-            appendConnectionLog("VPN state changed to \(connectionState.rawValue)")
+            appendConnectionLog("State: \(previousState.rawValue) → \(connectionState.rawValue)")
+            if connectionState == .connected, let date = connectedDate {
+                appendConnectionLog("Connected at \(Self.logDateFormatter.string(from: date))")
+            }
         }
     }
 }

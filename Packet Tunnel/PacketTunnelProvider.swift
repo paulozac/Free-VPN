@@ -181,8 +181,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 guard components.count == 2 else { continue }
                 let proto = components[1].trimmingCharacters(in: .whitespaces)
                 switch proto {
-                case "udp": return .udp
-                case "tcp", "tcp-client", "tcp-server": return .tcp
+                case "udp": return .UDP
+                case "tcp", "tcp-client", "tcp-server": return .TCP
                 case "adaptive": return .adaptive
                 default: return nil
                 }
@@ -193,8 +193,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 if components.count >= 4 {
                     let protoToken = components[3].trimmingCharacters(in: .whitespaces)
                     switch protoToken {
-                    case "udp", "udp4", "udp6": return .udp
-                    case "tcp", "tcp-client", "tcp-server": return .tcp
+                    case "udp", "udp4", "udp6": return .UDP
+                    case "tcp", "tcp-client", "tcp-server": return .TCP
                     case "adaptive": return .adaptive
                     default: break
                     }
@@ -275,8 +275,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             configuration.proto = transportProtocol
             let protoName: String
             switch transportProtocol {
-            case .udp: protoName = "udp"
-            case .tcp: protoName = "tcp"
+            case .UDP: protoName = "udp"
+            case .TCP: protoName = "tcp"
             case .adaptive: protoName = "adaptive"
             default: protoName = "default"
             }
