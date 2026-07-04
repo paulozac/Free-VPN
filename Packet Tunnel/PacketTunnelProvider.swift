@@ -12,11 +12,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }()
 
-    private lazy var openVPNAdapter: OpenVPNAdapter = {
+    private var openVPNAdapter: OpenVPNAdapter?
+
+    private func createOpenVPNAdapter() -> OpenVPNAdapter {
         let adapter = OpenVPNAdapter()
         adapter.delegate = self
+        openVPNAdapter = adapter
         return adapter
-    }()
+    }
 
     private var activeProtocol: String = "wireguard"
     private var openVPNStartCompletion: ((Error?) -> Void)?
@@ -45,7 +48,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         switch activeProtocol {
         case "openVPN":
-            openVPNAdapter.disconnect()
+            openVPNAdapter?.disconnect()
         default:
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 wireGuardAdapter.stop { _ in
@@ -201,6 +204,27 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         return nil
     }
 
+    /// Flips the transport protocol between UDP and TCP in an OpenVPN config.
+    /// Returns nil if no proto directive was found or it couldn't be flipped.
+    private static func flipProtocol(in config: String) -> String? {
+        var lines = config.components(separatedBy: "\n")
+        var flipped = false
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces).lowercased()
+            if trimmed.hasPrefix("proto ") {
+                if trimmed.contains("tcp") {
+                    lines[index] = "proto udp"
+                    flipped = true
+                } else if trimmed.contains("udp") {
+                    lines[index] = "proto tcp"
+                    flipped = true
+                }
+                break
+            }
+        }
+        return flipped ? lines.joined(separator: "\n") : nil
+    }
+
     // MARK: - OpenVPN
 
     private func startOpenVPNTunnel(providerConfig: [String: Any]) async throws {
@@ -222,8 +246,32 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
         }
 
+        do {
+            try await attemptOpenVPNConnection(config: sanitizedConfig)
+            log.info("OpenVPN tunnel started successfully")
+        } catch let error as NEVPNError where error.code == .configurationInvalid {
+            // Configuration error — don't retry, just propagate
+            throw error
+        } catch {
+            // Connection failure — try flipping the protocol (UDP ↔ TCP)
+            log.warning("OpenVPN connection failed: \(error.localizedDescription)")
+            openVPNAdapter?.disconnect()
+            if let flippedConfig = Self.flipProtocol(in: sanitizedConfig) {
+                log.info("Retrying OpenVPN with flipped protocol (UDP ↔ TCP)...")
+                try await attemptOpenVPNConnection(config: flippedConfig)
+                log.info("OpenVPN tunnel started with flipped protocol")
+            } else {
+                throw error
+            }
+        }
+    }
+
+    /// Attempts a single OpenVPN connection with the given config string.
+    private func attemptOpenVPNConnection(config: String) async throws {
+        let adapter = createOpenVPNAdapter()
+
         let configuration = OpenVPNConfiguration()
-        if let transportProtocol = Self.extractTransportProtocol(from: sanitizedConfig) {
+        if let transportProtocol = Self.extractTransportProtocol(from: config) {
             configuration.proto = transportProtocol
             let protoName: String
             switch transportProtocol {
@@ -234,12 +282,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             log.info("OpenVPN transport protocol override: \(protoName, privacy: .public)")
         }
-        configuration.fileContent = sanitizedConfig.data(using: .utf8)
+        configuration.fileContent = config.data(using: .utf8)
         configuration.tunPersist = false
         configuration.compressionMode = .disabled
         configuration.googleDNSFallback = true
         configuration.connectionTimeout = 30
-        let lowerConfig = sanitizedConfig.lowercased()
+        let lowerConfig = config.lowercased()
 
         // Force AES-CBC ciphersuite only when config explicitly uses CBC cipher
         if lowerConfig.contains("cipher") && lowerConfig.contains("-cbc") {
@@ -253,7 +301,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         let evaluation: OpenVPNConfigurationEvaluation
         do {
-            evaluation = try openVPNAdapter.apply(configuration: configuration)
+            evaluation = try adapter.apply(configuration: configuration)
         } catch {
             log.error("Failed to apply OpenVPN config: \(error.localizedDescription)")
             log.error("OpenVPN apply error details: \((error as NSError).userInfo)")
@@ -273,7 +321,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 credentials.username = username
                 credentials.password = password
                 do {
-                    try openVPNAdapter.provide(credentials: credentials)
+                    try adapter.provide(credentials: credentials)
                 } catch {
                     log.error("Failed to provide credentials: \(error.localizedDescription)")
                     throw NEVPNError(.configurationInvalid)
@@ -299,7 +347,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
             }
 
-            self.openVPNAdapter.connect(using: self.packetFlow)
+            adapter.connect(using: self.packetFlow)
 
             // Timeout after 30 seconds
             DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
@@ -308,8 +356,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 continuation.resume(throwing: NEVPNError(.connectionFailed))
             }
         }
-
-        log.info("OpenVPN tunnel started successfully")
     }
 }
 

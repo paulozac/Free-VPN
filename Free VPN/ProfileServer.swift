@@ -464,10 +464,12 @@ final class ProfileServer {
     }
 
     nonisolated func getLocalIPAddress() -> String {
-        var address = "0.0.0.0"
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return address }
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return "0.0.0.0" }
         defer { freeifaddrs(ifaddr) }
+
+        var bestAddress: String?
+        var fallbackAddress: String?
 
         for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
             let flags = Int32(ptr.pointee.ifa_flags)
@@ -478,13 +480,21 @@ final class ProfileServer {
                   (flags & IFF_LOOPBACK) == 0 else { continue }
 
             var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            if getnameinfo(ptr.pointee.ifa_addr, socklen_t(addr.sa_len),
-                           &hostname, socklen_t(hostname.count),
-                           nil, 0, NI_NUMERICHOST) == 0 {
-                address = String(cString: hostname)
+            guard getnameinfo(ptr.pointee.ifa_addr, socklen_t(addr.sa_len),
+                              &hostname, socklen_t(hostname.count),
+                              nil, 0, NI_NUMERICHOST) == 0 else { continue }
+
+            let name = String(cString: ptr.pointee.ifa_name)
+            let ip = String(cString: hostname)
+
+            // Prefer en* interfaces (Wi-Fi/Ethernet) over tunnel/virtual interfaces
+            if name.hasPrefix("en") {
+                bestAddress = ip
                 break
+            } else if fallbackAddress == nil {
+                fallbackAddress = ip
             }
         }
-        return address
+        return bestAddress ?? fallbackAddress ?? "0.0.0.0"
     }
 }
