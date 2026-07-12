@@ -10,11 +10,13 @@ import Foundation
 enum VPNProtocolType: String, Codable, Sendable {
     case wireGuard
     case openVPN
+    case amneziaWG
 
     var displayName: String {
         switch self {
         case .wireGuard: "WireGuard"
         case .openVPN: "OpenVPN"
+        case .amneziaWG: "AmneziaWG"
         }
     }
 
@@ -22,6 +24,7 @@ enum VPNProtocolType: String, Codable, Sendable {
         switch self {
         case .wireGuard: "WG"
         case .openVPN: "OVPN"
+        case .amneziaWG: "AWG"
         }
     }
 
@@ -29,9 +32,18 @@ enum VPNProtocolType: String, Codable, Sendable {
     static func detect(from configString: String) -> VPNProtocolType {
         let lower = configString.lowercased()
 
-        // WireGuard: has [Interface] + [Peer] with PrivateKey
+        // WireGuard family: has [Interface] + [Peer] with PrivateKey
         if lower.contains("[interface]") && lower.contains("[peer]") && lower.contains("privatekey") {
-            return .wireGuard
+            // AmneziaWG: WireGuard + obfuscation params (Jc, Jmin, Jmax, S1, S2, H1-H4)
+            let awgKeys = ["jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"]
+            let hasAWGParams = configString.components(separatedBy: .newlines).contains { line in
+                let trimmed = line.trimmingCharacters(in: .whitespaces).lowercased()
+                return awgKeys.contains { key in
+                    trimmed.hasPrefix(key) &&
+                    trimmed.dropFirst(key.count).trimmingCharacters(in: .whitespaces).hasPrefix("=")
+                }
+            }
+            return hasAWGParams ? .amneziaWG : .wireGuard
         }
 
         // OpenVPN: has client directive, remote server, or inline certificates

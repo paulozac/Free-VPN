@@ -41,148 +41,134 @@ struct ContentView: View {
     @Namespace private var focusNamespace
     @State private var profileContentHeight: CGFloat = 0
     @State private var profileScrollHeight: CGFloat = 0
+    @State private var showUploadingPopup = false
+    @State private var uploadProgress: Double = 0
+    @State private var uploadedProfileID: UUID?
 
     var body: some View {
         NavigationStack {
             HStack(alignment: .top, spacing: 0) {
                 // Left: Status + Controls
-                VStack(spacing: 20) {
-                    Group {
-                        if vpnManager.connectionState == .connected {
-                            ZStack {
-                                Text("Z")
-                                    .font(.system(size: 80, weight: .black, design: .rounded))
-                                    .foregroundStyle(Theme.accent)
-                                Image(systemName: "lock.fill")
-                                    .font(.system(size: 22, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(8)
-                                    .background(Theme.accent)
-                                    .clipShape(Circle())
-                                    .offset(x: 34, y: -30)
+                VStack(spacing: 0) {
+                    // Upper area: status + speed test (scrollable to prevent overlap)
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 12) {
+                            Group {
+                                if vpnManager.connectionState == .connected {
+                                    ZStack {
+                                        Text("Z")
+                                            .font(.system(size: 80, weight: .black, design: .rounded))
+                                            .foregroundStyle(Theme.accent)
+                                        Image(systemName: "lock.fill")
+                                            .font(.system(size: 22, weight: .bold))
+                                            .foregroundStyle(.white)
+                                            .padding(8)
+                                            .background(Theme.accent)
+                                            .clipShape(Circle())
+                                            .offset(x: 34, y: -30)
+                                    }
+                                } else {
+                                    Image(systemName: statusIconName)
+                                        .font(.system(size: 80))
+                                        .foregroundStyle(statusIconColor)
+                                        .symbolEffect(.pulse, isActive: vpnManager.connectionState == .connecting || vpnManager.connectionState == .disconnecting || vpnManager.connectionState == .reasserting)
+                                }
                             }
-                        } else {
-                            Image(systemName: statusIconName)
-                                .font(.system(size: 80))
-                                .foregroundStyle(statusIconColor)
-                                .symbolEffect(.pulse, isActive: vpnManager.connectionState == .connecting || vpnManager.connectionState == .disconnecting || vpnManager.connectionState == .reasserting)
-                        }
-                    }
-                    .frame(height: 90)
-                    .padding(.top, 40)
+                            .frame(height: 90)
 
-                    Text(vpnManager.connectionState.rawValue)
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
+                            Text(vpnManager.connectionState.rawValue)
+                                .font(.title2)
+                                .foregroundStyle(.secondary)
 
-                    if vpnManager.connectionState == .connected {
-                        VStack(spacing: 4) {
-                            if let selectedProfile = profileStore.profiles.first(where: { $0.id == profileStore.selectedProfileID }) {
-                                Text(selectedProfile.name)
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                Text(selectedProfile.vpnProtocol.displayName)
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(Theme.accent)
-                            }
-                            if let date = vpnManager.connectedDate {
-                                Text("Connected \(date, style: .relative) ago")
+                            if vpnManager.connectionState == .connected {
+                                VStack(spacing: 4) {
+                                    if let selectedProfile = profileStore.profiles.first(where: { $0.id == profileStore.selectedProfileID }) {
+                                        Text(selectedProfile.name)
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                        Text(selectedProfile.vpnProtocol.displayName)
+                                            .font(.caption)
+                                            .fontWeight(.semibold)
+                                            .foregroundStyle(Theme.accent)
+                                    }
+                                    if let date = vpnManager.connectedDate {
+                                        Text("Connected \(date, style: .relative) ago")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if let ip = vpnManager.serverIP {
+                                        Text("IP: \(ip)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if let location = vpnManager.serverCity {
+                                        Text(location)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    HStack(spacing: 12) {
+                                        Label(VPNManager.formattedBytes(vpnManager.bytesIn), systemImage: "arrow.down.circle.fill")
+                                        Label(VPNManager.formattedBytes(vpnManager.bytesOut), systemImage: "arrow.up.circle.fill")
+                                    }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                            }
-                            if let ip = vpnManager.serverIP {
-                                Text("IP: \(ip)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let location = vpnManager.serverCity {
-                                Text(location)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            HStack(spacing: 12) {
-                                Label(VPNManager.formattedBytes(vpnManager.bytesIn), systemImage: "arrow.down.circle.fill")
-                                Label(VPNManager.formattedBytes(vpnManager.bytesOut), systemImage: "arrow.up.circle.fill")
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                        }
-                    }
-
-                    // Speed Test Results
-                    if speedTest.state != .idle {
-                        VStack(spacing: 6) {
-                            if speedTest.isRunning {
-                                ProgressView(value: speedTest.progress)
-                                    .tint(Theme.accent)
-                                Text(speedTestPhaseText)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 4)
+                                }
                             }
 
-                            if let ip = speedTest.testServerIP {
-                                HStack {
-                                    Image(systemName: "globe")
-                                        .foregroundStyle(.green)
-                                    Text("Test Server")
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    VStack(alignment: .trailing, spacing: 2) {
-                                        if let hostname = speedTest.testServerHostname {
-                                            Text(hostname)
-                                                .fontWeight(.semibold)
-                                        }
-                                        Text(ip)
+                            // Speed Test Results (3-column)
+                            if speedTest.state != .idle {
+                                VStack(spacing: 6) {
+                                    if speedTest.isRunning {
+                                        ProgressView(value: speedTest.progress)
+                                            .tint(Theme.accent)
+                                        Text(speedTestPhaseText)
                                             .font(.caption2)
-                                            .foregroundStyle(.tertiary)
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    HStack(alignment: .top, spacing: 12) {
+                                        speedTestCompactRow("Latency", icon: "clock.fill", color: .cyan,
+                                                            primary: speedTest.minLatencyMs, average: speedTest.latencyMs,
+                                                            unit: "ms", decimals: 0)
+                                        speedTestCompactRow("Download", icon: "arrow.down.circle.fill", color: .blue,
+                                                            primary: speedTest.peakDownloadMbps, average: speedTest.downloadMbps,
+                                                            unit: "Mbps", decimals: 1)
+                                        speedTestCompactRow("Upload", icon: "arrow.up.circle.fill", color: .purple,
+                                                            primary: speedTest.peakUploadMbps, average: speedTest.uploadMbps,
+                                                            unit: "Mbps", decimals: 1)
+                                    }
+
+                                    if case .error(let msg) = speedTest.state {
+                                        Text(msg)
+                                            .font(.caption2)
+                                            .foregroundStyle(.red)
+                                            .lineLimit(1)
                                     }
                                 }
-                                .font(.caption)
+                                .padding(.horizontal, 8)
                             }
-                            speedTestRow("Latency", icon: "clock.fill", color: .cyan,
-                                         primary: speedTest.minLatencyMs, average: speedTest.latencyMs,
-                                         unit: "ms", decimals: 0)
-                            speedTestRow("Download", icon: "arrow.down.circle.fill", color: .blue,
-                                         primary: speedTest.peakDownloadMbps, average: speedTest.downloadMbps,
-                                         unit: "Mbps", decimals: 1)
-                            speedTestRow("Upload", icon: "arrow.up.circle.fill", color: .purple,
-                                         primary: speedTest.peakUploadMbps, average: speedTest.uploadMbps,
-                                         unit: "Mbps", decimals: 1)
-                            if case .error(let msg) = speedTest.state {
-                                Text(msg)
-                                    .font(.caption2)
-                                    .foregroundStyle(.red)
+
+                            Button {
+                                if speedTest.isRunning {
+                                    speedTest.cancel()
+                                } else {
+                                    speedTest.startTest()
+                                }
+                            } label: {
+                                Label(speedTest.isRunning ? "Cancel" : "Speed Test", systemImage: speedTest.isRunning ? "xmark.circle" : "speedometer")
+                                    .font(.callout)
+                                    .fontWeight(.semibold)
+                                    .frame(maxWidth: .infinity)
                             }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.accent)
+
                         }
-                        .padding(.horizontal, 8)
+                        .padding(.top, 40)
                     }
 
-                    Spacer().frame(height: 8)
-
-                    Button {
-                        if speedTest.isRunning {
-                            speedTest.cancel()
-                        } else {
-                            speedTest.startTest()
-                        }
-                    } label: {
-                        Label(speedTest.isRunning ? "Cancel" : "Speed Test", systemImage: speedTest.isRunning ? "xmark.circle" : "speedometer")
-                            .font(.callout)
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent)
-
-                    Text("Powered by Cloudflare \u{2601}")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-
-                    Spacer()
-
-                    // Inline QR code for profile upload
+                    // QR code pinned at bottom — never moves
                     if let url = profileServer.localURL {
                         VStack(spacing: 8) {
                             Text("Upload Profile")
@@ -192,12 +178,14 @@ struct ContentView: View {
                                 .textCase(.uppercase)
 
                             if let image = generateQRCode(from: url) {
+                                let qrSize: CGFloat = speedTest.state != .idle ? 160 : 300
                                 Image(uiImage: image)
                                     .interpolation(.none)
                                     .resizable()
                                     .scaledToFit()
-                                    .frame(width: 160, height: 160)
+                                    .frame(width: qrSize, height: qrSize)
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .animation(.easeInOut(duration: 0.3), value: speedTest.state != .idle)
                             }
 
                             Text(url)
@@ -206,11 +194,12 @@ struct ContentView: View {
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.5)
                         }
+                        .padding(.bottom, 20)
                     } else {
                         ProgressView("Starting Profile Upload Server...")
                             .font(.caption2)
+                            .padding(.bottom, 20)
                     }
-                    Spacer().frame(height: 20)
                 }
                 .focusSection()
                 .containerRelativeFrame(.horizontal) { length, _ in length * 0.4 }
@@ -267,8 +256,8 @@ struct ContentView: View {
                                                     .fontWeight(.semibold)
                                                     .padding(.horizontal, 6)
                                                     .padding(.vertical, 2)
-                                                    .background(isActive ? Color.white.opacity(0.25) : profile.vpnProtocol == .wireGuard ? Theme.accent.opacity(0.2) : Color.orange.opacity(0.2))
-                                                    .foregroundStyle(isActive ? .white : profile.vpnProtocol == .wireGuard ? Theme.accent : .orange)
+                                                    .background(isActive ? Color.white.opacity(0.25) : protocolBadgeColor(profile.vpnProtocol).opacity(0.2))
+                                                    .foregroundStyle(isActive ? .white : protocolBadgeColor(profile.vpnProtocol))
                                                     .clipShape(Capsule())
                                             }
                                             if isActive {
@@ -469,28 +458,61 @@ struct ContentView: View {
             } message: {
                 Text("Are you sure you want to delete \"\(deletingProfile?.name ?? "")\"?")
             }
-            .sheet(isPresented: $showingLogs) {
+            .overlay {
+                if showUploadingPopup {
+                    ZStack {
+                        Color.black.opacity(0.6)
+                            .ignoresSafeArea()
+
+                        VStack(spacing: 20) {
+                            Image(systemName: "arrow.down.doc.fill")
+                                .font(.system(size: 50))
+                                .foregroundStyle(Theme.accent)
+                                .symbolEffect(.pulse)
+
+                            Text("Uploading Profile")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+
+                            ProgressView(value: uploadProgress)
+                                .tint(Theme.accent)
+                                .frame(width: 240)
+
+                            Text("\(Int(uploadProgress * 100))%")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        .padding(40)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.3), value: showUploadingPopup)
+            .fullScreenCover(isPresented: $showingLogs) {
                 NavigationStack {
                     ScrollViewReader { proxy in
-                        ScrollView {
+                        ScrollView([.horizontal, .vertical]) {
                             VStack(alignment: .leading, spacing: 2) {
                                 if vpnManager.connectionLog.isEmpty {
                                     Text("No logs yet. Connect to a VPN profile to see activity.")
                                         .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity)
                                         .padding(.top, 40)
                                 } else {
                                     ForEach(Array(vpnManager.connectionLog.enumerated()), id: \.offset) { index, line in
                                         Text(line)
                                             .font(.system(.body, design: .monospaced))
                                             .foregroundStyle(line.contains("ERROR") ? .red : line.contains("State:") ? .primary : .secondary)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .fixedSize(horizontal: true, vertical: false)
                                             .id(index)
                                     }
                                 }
                             }
-                            .padding(32)
+                            .padding(40)
+                            .frame(minWidth: 800, alignment: .leading)
                         }
+                        .focusable()
                         .onChange(of: vpnManager.connectionLog.count) {
                             if let last = vpnManager.connectionLog.indices.last {
                                 withAnimation {
@@ -509,14 +531,10 @@ struct ContentView: View {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Close") { showingLogs = false }
                         }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Text("\(vpnManager.connectionLog.count) entries")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
                     }
                 }
-                .presentationDetents([.large])
+                .background(Color.black)
+                .ignoresSafeArea()
             }
             .onAppear {
                 startServer()
@@ -528,15 +546,54 @@ struct ContentView: View {
                     profileServer.stop()
                 }
             }
+            .onChange(of: speedTest.state) { _, newState in
+                if case .done = newState {
+                    focusedProfileID = defaultFocusProfileID
+                } else if case .error = newState {
+                    focusedProfileID = defaultFocusProfileID
+                }
+            }
         }
     }
 
     private func startServer() {
         profileServer.onProfileReceived = { name, config, username, password in
+            // Show uploading popup
+            uploadProgress = 0
+            showUploadingPopup = true
+
+            let startTime = Date()
+
+            // Add the profile
             let error = profileStore.addProfile(name: name, configString: config, username: username, password: password)
-            if error == nil, let profile = profileStore.profiles.last {
-                profileStore.selectProfile(profile)
-                connectToProfile(profile)
+            let newProfile: SavedProfile? = (error == nil) ? profileStore.profiles.last : nil
+
+            // Animate progress over 3 seconds, then dismiss and focus
+            Task {
+                let totalDuration: Double = 3.0
+                let steps = 30
+                let stepDuration = totalDuration / Double(steps)
+
+                for i in 1...steps {
+                    try? await Task.sleep(for: .milliseconds(Int(stepDuration * 1000)))
+                    uploadProgress = Double(i) / Double(steps)
+                }
+
+                // Ensure at least 3 seconds have elapsed
+                let elapsed = Date().timeIntervalSince(startTime)
+                if elapsed < totalDuration {
+                    try? await Task.sleep(for: .milliseconds(Int((totalDuration - elapsed) * 1000)))
+                }
+
+                showUploadingPopup = false
+                uploadProgress = 0
+
+                if let profile = newProfile {
+                    profileStore.selectProfile(profile)
+                    uploadedProfileID = profile.id
+                    focusedProfileID = profile.id
+                    connectToProfile(profile)
+                }
             }
         }
         profileServer.start()
@@ -591,27 +648,25 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func speedTestRow(_ label: String, icon: String, color: Color,
-                              primary: Double?, average: Double?,
-                              unit: String, decimals: Int) -> some View {
+    private func speedTestCompactRow(_ label: String, icon: String, color: Color,
+                                     primary: Double?, average: Double?,
+                                     unit: String, decimals: Int) -> some View {
         if let value = primary {
-            HStack {
-                Image(systemName: icon)
-                    .foregroundStyle(color)
-                Text(label)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(String(format: "%.\(decimals)f \(unit)", value))
-                        .fontWeight(.semibold)
-                    if let avg = average {
-                        Text(String(format: "Avg: %.\(decimals)f \(unit)", avg))
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Image(systemName: icon)
+                        .foregroundStyle(color)
+                    Text(label)
+                        .foregroundStyle(.secondary)
+                }
+                Text(String(format: "%.\(decimals)f \(unit)", value))
+                    .fontWeight(.semibold)
+                if let avg = average {
+                    Text(String(format: "avg %.\(decimals)f", avg))
+                        .foregroundStyle(.tertiary)
                 }
             }
-            .font(.caption)
+            .font(.caption2)
         }
     }
 
@@ -625,6 +680,14 @@ struct ContentView: View {
         let context = CIContext()
         guard let cgImage = context.createCGImage(transformed, from: transformed.extent) else { return nil }
         return UIImage(cgImage: cgImage)
+    }
+
+    private func protocolBadgeColor(_ proto: VPNProtocolType) -> Color {
+        switch proto {
+        case .wireGuard: Theme.accent
+        case .openVPN: .orange
+        case .amneziaWG: .purple
+        }
     }
 
     private var statusIconName: String {

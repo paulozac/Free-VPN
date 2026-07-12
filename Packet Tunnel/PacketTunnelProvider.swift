@@ -1,14 +1,22 @@
 import NetworkExtension
 import os.log
 import WireGuardKit
+import AmneziaWGKit
 import OpenVPNAdapter
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private let log = Logger(subsystem: "com.zacvpn.zacvpn.PacketTunnel", category: "tunnel")
-    private lazy var wireGuardAdapter: WireGuardAdapter = {
-        return WireGuardAdapter(with: self) { [weak self] logLevel, message in
+    private lazy var wireGuardAdapter: WireGuardKit.WireGuardAdapter = {
+        return WireGuardKit.WireGuardAdapter(with: self) { [weak self] logLevel, message in
             self?.log.log(level: logLevel == .error ? .error : .debug, "\(message, privacy: .public)")
+        }
+    }()
+
+    private lazy var amneziaWGAdapter: AmneziaWGKit.WireGuardAdapter = {
+        return AmneziaWGKit.WireGuardAdapter(with: self) { [weak self] logLevel, message in
+            self?.log.log(level: logLevel == .error ? .error : .debug, "AWG: \(message, privacy: .public)")
+            self?.appendTunnelLog("AWG: \(message)")
         }
     }()
 
@@ -23,32 +31,66 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private var activeProtocol: String = "wireguard"
     private var openVPNStartCompletion: ((Error?) -> Void)?
+    private var tunnelLog: [String] = []
+    private static let sharedDefaults = UserDefaults(suiteName: "group.com.zacvpn.zacvpn")
+    private let tunnelLogDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    private func appendTunnelLog(_ message: String) {
+        let ts = tunnelLogDateFormatter.string(from: Date())
+        let entry = "[\(ts)] \(message)"
+        tunnelLog.append(entry)
+        // Keep at most 500 entries
+        if tunnelLog.count > 500 {
+            tunnelLog.removeFirst(tunnelLog.count - 500)
+        }
+        // Persist to shared UserDefaults so app can read even after extension terminates
+        Self.sharedDefaults?.set(tunnelLog, forKey: "tunnelLog")
+    }
 
     override func startTunnel(options: [String: NSObject]? = nil) async throws {
+        tunnelLog.removeAll()
+        appendTunnelLog("Tunnel extension starting")
+
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
               let providerConfig = protocolConfig.providerConfiguration else {
             log.error("Missing provider configuration")
+            appendTunnelLog("ERROR: Missing provider configuration")
             throw NEVPNError(.configurationInvalid)
         }
 
         let protocolType = providerConfig["protocolType"] as? String ?? "wireguard"
         activeProtocol = protocolType
+        appendTunnelLog("Protocol: \(protocolType)")
         log.info("Starting tunnel with protocol: \(protocolType)")
 
         switch protocolType {
         case "openVPN":
             try await startOpenVPNTunnel(providerConfig: providerConfig)
+        case "amneziaWG":
+            appendTunnelLog("AmneziaWG mode (obfuscated WireGuard)")
+            try await startAmneziaWGTunnel(providerConfig: providerConfig)
         default:
             try await startWireGuardTunnel(providerConfig: providerConfig)
         }
     }
 
     override func stopTunnel(with reason: NEProviderStopReason) async {
+        appendTunnelLog("Stopping tunnel, reason: \(reason)")
         log.info("Stopping tunnel, reason: \(String(describing: reason))")
 
         switch activeProtocol {
         case "openVPN":
             openVPNAdapter?.disconnect()
+        case "amneziaWG":
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                amneziaWGAdapter.stop { _ in
+                    continuation.resume()
+                }
+            }
         default:
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 wireGuardAdapter.stop { _ in
@@ -59,7 +101,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func handleAppMessage(_ messageData: Data) async -> Data? {
-        return nil
+        // Return collected tunnel logs as JSON
+        return try? JSONEncoder().encode(tunnelLog)
     }
 
     /// Resolves a persistent Keychain reference to retrieve the stored password.
@@ -98,9 +141,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         log.info("WireGuard config received (\(wgQuickConfig.count) chars)")
 
-        let tunnelConfig: TunnelConfiguration
+        let tunnelConfig: WireGuardKit.TunnelConfiguration
         do {
-            tunnelConfig = try TunnelConfiguration(fromWgQuickConfig: wgQuickConfig, called: "ZacVPN")
+            tunnelConfig = try WireGuardKit.TunnelConfiguration(fromWgQuickConfig: wgQuickConfig, called: "ZacVPN")
         } catch {
             log.error("Failed to parse WireGuard config: \(error.localizedDescription)")
             throw NEVPNError(.configurationInvalid)
@@ -119,23 +162,104 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         log.info("WireGuard tunnel started successfully")
     }
 
+    // MARK: - AmneziaWG
+
+    private func startAmneziaWGTunnel(providerConfig: [String: Any]) async throws {
+        guard let wgQuickConfig = providerConfig["wgQuickConfig"] as? String else {
+            log.error("Missing AmneziaWG configuration")
+            throw NEVPNError(.configurationInvalid)
+        }
+
+        log.info("AmneziaWG config received (\(wgQuickConfig.count) chars)")
+        appendTunnelLog("AmneziaWG config received (\(wgQuickConfig.count) chars)")
+
+        let tunnelConfig: AmneziaWGKit.TunnelConfiguration
+        do {
+            tunnelConfig = try AmneziaWGKit.TunnelConfiguration(fromWgQuickConfig: wgQuickConfig, called: "ZacVPN-AWG")
+        } catch {
+            log.error("Failed to parse AmneziaWG config: \(error.localizedDescription)")
+            appendTunnelLog("ERROR: Failed to parse AmneziaWG config: \(error.localizedDescription)")
+            throw NEVPNError(.configurationInvalid)
+        }
+
+        // Log obfuscation parameters
+        let iface = tunnelConfig.interface
+        if let jc = iface.junkPacketCount { appendTunnelLog("AWG Jc=\(jc)") }
+        if let jmin = iface.junkPacketMinSize { appendTunnelLog("AWG Jmin=\(jmin)") }
+        if let jmax = iface.junkPacketMaxSize { appendTunnelLog("AWG Jmax=\(jmax)") }
+        if let s1 = iface.initPacketJunkSize { appendTunnelLog("AWG S1=\(s1)") }
+        if let s2 = iface.responsePacketJunkSize { appendTunnelLog("AWG S2=\(s2)") }
+        if let h1 = iface.initPacketMagicHeader { appendTunnelLog("AWG H1=\(h1)") }
+        if let h2 = iface.responsePacketMagicHeader { appendTunnelLog("AWG H2=\(h2)") }
+        if let h3 = iface.underloadPacketMagicHeader { appendTunnelLog("AWG H3=\(h3)") }
+        if let h4 = iface.transportPacketMagicHeader { appendTunnelLog("AWG H4=\(h4)") }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            amneziaWGAdapter.start(tunnelConfiguration: tunnelConfig) { error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+
+        appendTunnelLog("AmneziaWG tunnel started successfully")
+        log.info("AmneziaWG tunnel started successfully")
+    }
+
     // MARK: - OpenVPN Config Sanitization
 
     /// Strips or transforms directives unsupported by OpenVPN3/OpenVPNAdapter.
     private static func sanitizeOpenVPNConfig(_ config: String) -> String {
         let unsupportedPrefixes = [
+            // Compression (comp-lzo is legacy; OpenVPN3 handles 'compress' natively)
             "comp-lzo",
+            // Performance tuning (not applicable on tvOS)
             "fast-io",
+            "float",
+            "sndbuf",
+            "rcvbuf",
             "tun-mtu-extra",
             "tun-mtu",
-            "mssfix",
+            "fragment",
+            "link-mtu",
+            // Routing (redirect-gateway crashes OpenVPN3 tun_builder; handled at NE level)
+            "redirect-gateway",
+            "redirect-private",
+            "route-method",
+            "route-delay",
+            // Persistence/daemon (desktop-only, no meaning on tvOS)
             "nobind",
+            "persist-key",
+            "persist-tun",
+            // Timers
             "ping-restart",
             "ping-timer-rem",
+            // Connection behavior
             "remote-random",
             "reneg-sec",
             "resolv-retry",
-            "verify-x509-name",
+            // Windows/Linux-only directives
+            "block-outside-dns",
+            "register-dns",
+            "ip-win32",
+            // Scripts (not supported on iOS/tvOS)
+            "script-security",
+            "up ",
+            "down ",
+            "route-up",
+            "route-pre-down",
+            // Environment/plugin (not supported)
+            "setenv",
+            "plugin",
+            // Logging/management (desktop-only)
+            "log ",
+            "log-append",
+            "suppress-timestamps",
+            "machine-readable-output",
+            "status",
+            "management",
         ]
 
         var lines = config.components(separatedBy: "\n")
@@ -168,61 +292,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return line
         }
 
+        // Prevent server-pushed options from crashing OpenVPN3 tun_builder on tvOS.
+        // The server pushes redirect-gateway which triggers tun_builder_reroute_gw,
+        // and that callback fails on tvOS. route-nopull prevents ALL server pushes.
+        // We handle routing (default route) and DNS (fallback) at the NE level instead.
+        lines.append("route-nopull")
+
         return lines.joined(separator: "\n")
-    }
-
-    private static func extractTransportProtocol(from config: String) -> OpenVPNTransportProtocol? {
-        for line in config.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            let lower = trimmed.lowercased()
-
-            if lower.hasPrefix("proto ") {
-                let components = lower.split(separator: " ", maxSplits: 1)
-                guard components.count == 2 else { continue }
-                let proto = components[1].trimmingCharacters(in: .whitespaces)
-                switch proto {
-                case "udp": return .UDP
-                case "tcp", "tcp-client", "tcp-server": return .TCP
-                case "adaptive": return .adaptive
-                default: return nil
-                }
-            }
-
-            if lower.hasPrefix("remote ") {
-                let components = lower.split(separator: " ")
-                if components.count >= 4 {
-                    let protoToken = components[3].trimmingCharacters(in: .whitespaces)
-                    switch protoToken {
-                    case "udp", "udp4", "udp6": return .UDP
-                    case "tcp", "tcp-client", "tcp-server": return .TCP
-                    case "adaptive": return .adaptive
-                    default: break
-                    }
-                }
-            }
-        }
-        return nil
-    }
-
-    /// Flips the transport protocol between UDP and TCP in an OpenVPN config.
-    /// Returns nil if no proto directive was found or it couldn't be flipped.
-    private static func flipProtocol(in config: String) -> String? {
-        var lines = config.components(separatedBy: "\n")
-        var flipped = false
-        for (index, line) in lines.enumerated() {
-            let trimmed = line.trimmingCharacters(in: .whitespaces).lowercased()
-            if trimmed.hasPrefix("proto ") {
-                if trimmed.contains("tcp") {
-                    lines[index] = "proto udp"
-                    flipped = true
-                } else if trimmed.contains("udp") {
-                    lines[index] = "proto tcp"
-                    flipped = true
-                }
-                break
-            }
-        }
-        return flipped ? lines.joined(separator: "\n") : nil
     }
 
     // MARK: - OpenVPN
@@ -233,81 +309,71 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             throw NEVPNError(.configurationInvalid)
         }
 
+        appendTunnelLog("OpenVPN config received (\(ovpnConfig.count) chars)")
         log.info("OpenVPN config received (\(ovpnConfig.count) chars)")
         log.info("OpenVPN config preview: \(String(ovpnConfig.prefix(200)), privacy: .public)")
 
         let sanitizedConfig = Self.sanitizeOpenVPNConfig(ovpnConfig)
+        appendTunnelLog("Sanitized config (\(sanitizedConfig.count) chars)")
         log.info("Sanitized OpenVPN config (\(sanitizedConfig.count) chars):")
-        // Log sanitized config (excluding inline cert blocks) for debugging
+        // Log sanitized config directives (excluding inline cert blocks) for debugging
+        var inCertBlock = false
         for line in sanitizedConfig.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if !trimmed.isEmpty && !trimmed.hasPrefix("-") && !trimmed.hasPrefix("MI") {
+            if trimmed.hasPrefix("<") && !trimmed.hasPrefix("</") { inCertBlock = true }
+            if trimmed.hasPrefix("</") { inCertBlock = false; continue }
+            if inCertBlock { continue }
+            if !trimmed.isEmpty {
+                appendTunnelLog("  directive: \(trimmed)")
                 log.info("  \(trimmed, privacy: .public)")
             }
         }
 
-        do {
-            try await attemptOpenVPNConnection(config: sanitizedConfig)
-            log.info("OpenVPN tunnel started successfully")
-        } catch let error as NEVPNError where error.code == .configurationInvalid {
-            // Configuration error — don't retry, just propagate
-            throw error
-        } catch {
-            // Connection failure — try flipping the protocol (UDP ↔ TCP)
-            log.warning("OpenVPN connection failed: \(error.localizedDescription)")
-            openVPNAdapter?.disconnect()
-            if let flippedConfig = Self.flipProtocol(in: sanitizedConfig) {
-                log.info("Retrying OpenVPN with flipped protocol (UDP ↔ TCP)...")
-                try await attemptOpenVPNConnection(config: flippedConfig)
-                log.info("OpenVPN tunnel started with flipped protocol")
-            } else {
-                throw error
-            }
-        }
+        try await attemptOpenVPNConnection(config: sanitizedConfig)
+        appendTunnelLog("OpenVPN tunnel started successfully")
+        log.info("OpenVPN tunnel started successfully")
     }
 
     /// Attempts a single OpenVPN connection with the given config string.
     private func attemptOpenVPNConnection(config: String) async throws {
         let adapter = createOpenVPNAdapter()
+        appendTunnelLog("Creating OpenVPN adapter")
 
         let configuration = OpenVPNConfiguration()
-        if let transportProtocol = Self.extractTransportProtocol(from: config) {
-            configuration.proto = transportProtocol
-            let protoName: String
-            switch transportProtocol {
-            case .UDP: protoName = "udp"
-            case .TCP: protoName = "tcp"
-            case .adaptive: protoName = "adaptive"
-            default: protoName = "default"
-            }
-            log.info("OpenVPN transport protocol override: \(protoName, privacy: .public)")
-        }
         configuration.fileContent = config.data(using: .utf8)
         configuration.tunPersist = false
-        configuration.compressionMode = .disabled
+        configuration.compressionMode = .default
         configuration.googleDNSFallback = true
-        configuration.connectionTimeout = 30
+        configuration.connectionTimeout = 60
+        // Allow 1024-bit RSA certs signed with SHA1 (legacy routers)
+        configuration.tlsCertProfile = .legacy
+        // Don't enforce a minimum TLS version (legacy routers may only support TLS 1.0)
+        configuration.minTLSVersion = .versionDisabled
+        configuration.sslDebugLevel = 1
         let lowerConfig = config.lowercased()
-
-        // Force AES-CBC ciphersuite only when config explicitly uses CBC cipher
-        if lowerConfig.contains("cipher") && lowerConfig.contains("-cbc") {
-            configuration.forceCiphersuitesAESCBC = true
-        }
 
         // Disable client certificate if config doesn't include <cert>/<key> blocks
         if !lowerConfig.contains("<cert>") && !lowerConfig.contains("<key>") {
             configuration.disableClientCert = true
         }
 
+        appendTunnelLog("Applying config (tlsCertProfile=legacy, minTLS=disabled, timeout=60s)")
         let evaluation: OpenVPNConfigurationEvaluation
         do {
             evaluation = try adapter.apply(configuration: configuration)
         } catch {
+            let nsErr = error as NSError
+            appendTunnelLog("ERROR: Failed to apply config: \(error.localizedDescription)")
+            appendTunnelLog("ERROR details: domain=\(nsErr.domain) code=\(nsErr.code)")
+            for (key, val) in nsErr.userInfo {
+                appendTunnelLog("  \(key): \(val)")
+            }
             log.error("Failed to apply OpenVPN config: \(error.localizedDescription)")
             log.error("OpenVPN apply error details: \((error as NSError).userInfo)")
             throw NEVPNError(.configurationInvalid)
         }
 
+        appendTunnelLog("Config applied, autologin=\(evaluation.autologin)")
         log.info("OpenVPN config applied. autologin=\(evaluation.autologin)")
 
         // Provide credentials if needed
@@ -315,6 +381,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             let proto = protocolConfiguration as? NETunnelProviderProtocol
             let username = proto?.username ?? ""
             let password = Self.loadPasswordFromKeychain(proto?.passwordReference) ?? ""
+            appendTunnelLog("Auth required: user=\(!username.isEmpty), pass=\(!password.isEmpty)")
             log.info("OpenVPN requires auth. username provided: \(!username.isEmpty), password provided: \(!password.isEmpty)")
             if !username.isEmpty {
                 let credentials = OpenVPNCredentials()
@@ -331,6 +398,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
         }
 
+        appendTunnelLog("Starting OpenVPN connection...")
         log.info("Starting OpenVPN connection...")
 
         // Connect using async/await bridge with timeout
@@ -349,8 +417,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             adapter.connect(using: self.packetFlow)
 
-            // Timeout after 30 seconds
-            DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
+            // Timeout after 60 seconds
+            DispatchQueue.global().asyncAfter(deadline: .now() + 60) {
                 guard !hasResumed else { return }
                 hasResumed = true
                 continuation.resume(throwing: NEVPNError(.connectionFailed))
@@ -369,16 +437,44 @@ extension PacketTunnelProvider: OpenVPNAdapterDelegate {
 
     func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, configureTunnelWithNetworkSettings networkSettings: NEPacketTunnelNetworkSettings?, completionHandler: @escaping ((any Error)?) -> Void) {
         if let settings = networkSettings {
+            appendTunnelLog("Configuring tunnel network settings")
             log.info("OpenVPN configuring tunnel network settings:")
             if let ipv4 = settings.ipv4Settings {
+                appendTunnelLog("IPv4: \(ipv4.addresses.joined(separator: ", "))")
+                appendTunnelLog("Routes: \(ipv4.includedRoutes?.map { "\($0.destinationAddress)/\($0.destinationSubnetMask)" }.joined(separator: ", ") ?? "none")")
                 log.info("  IPv4: addresses=\(ipv4.addresses) masks=\(ipv4.subnetMasks)")
                 log.info("  IPv4 includedRoutes: \(ipv4.includedRoutes?.map { "\($0.destinationAddress)/\($0.destinationSubnetMask)" } ?? [])")
             }
             if let dns = settings.dnsSettings {
+                appendTunnelLog("DNS: \(dns.servers.joined(separator: ", "))")
                 log.info("  DNS servers: \(dns.servers)")
                 log.info("  DNS search domains: \(dns.searchDomains ?? [])")
             }
+            // Set a safe MTU to prevent "No buffer space available" TUN write errors
+            if settings.mtu == nil || settings.mtu == 0 {
+                settings.mtu = 1400
+                appendTunnelLog("MTU: set to 1400 (default)")
+            } else {
+                appendTunnelLog("MTU: \(settings.mtu!)")
+            }
             log.info("  MTU: \(settings.mtu ?? 0)")
+
+            // Ensure a default route exists so all traffic goes through the VPN
+            // (redirect-gateway is stripped from config since OpenVPN3 can't handle it on tvOS)
+            if let ipv4 = settings.ipv4Settings {
+                let hasDefaultRoute = ipv4.includedRoutes?.contains(where: {
+                    $0.destinationAddress == "0.0.0.0" && $0.destinationSubnetMask == "0.0.0.0"
+                }) ?? false
+                if !hasDefaultRoute {
+                    let defaultRoute = NEIPv4Route.default()
+                    defaultRoute.gatewayAddress = ipv4.addresses.first
+                    var routes = ipv4.includedRoutes ?? []
+                    routes.append(defaultRoute)
+                    ipv4.includedRoutes = routes
+                    appendTunnelLog("Added default route (0.0.0.0/0) for full tunnel")
+                    log.info("Added default route for redirect-gateway support")
+                }
+            }
 
             // Ensure DNS is configured — if OpenVPN server didn't push DNS, add fallback
             if settings.dnsSettings == nil || settings.dnsSettings?.servers.isEmpty == true {
@@ -401,18 +497,22 @@ extension PacketTunnelProvider: OpenVPNAdapterDelegate {
     }
 
     func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, handleEvent event: OpenVPNAdapterEvent, message: String?) {
+        appendTunnelLog("Event: \(event.rawValue)\(message.map { " — \($0)" } ?? "")")
         log.info("OpenVPN event: \(event.rawValue), message: \(message ?? "nil", privacy: .public)")
         switch event {
         case .connected:
+            appendTunnelLog("Connected!")
             log.info("OpenVPN connected successfully")
             reasserting = false
             openVPNStartCompletion?(nil)
             openVPNStartCompletion = nil
         case .disconnected:
+            appendTunnelLog("Disconnected")
             log.info("OpenVPN disconnected")
             openVPNStartCompletion?(NEVPNError(.connectionFailed))
             openVPNStartCompletion = nil
         case .reconnecting:
+            appendTunnelLog("Reconnecting...")
             log.info("OpenVPN reconnecting")
             reasserting = true
         default:
@@ -425,12 +525,17 @@ extension PacketTunnelProvider: OpenVPNAdapterDelegate {
         let isFatal = nsError.userInfo[OpenVPNAdapterErrorFatalKey] as? Bool ?? false
         let message = nsError.userInfo[OpenVPNAdapterErrorMessageKey] as? String ?? "none"
         let reason = nsError.localizedFailureReason ?? "none"
+        appendTunnelLog("ERROR\(isFatal ? " [FATAL]" : ""): \(error.localizedDescription)")
+        appendTunnelLog("  reason: \(reason)")
+        appendTunnelLog("  message: \(message)")
+        appendTunnelLog("  code: \(nsError.code)")
         log.error("OpenVPN error (fatal=\(isFatal)): \(error.localizedDescription, privacy: .public)")
         log.error("OpenVPN error reason: \(reason, privacy: .public)")
         log.error("OpenVPN error message: \(message, privacy: .public)")
         log.error("OpenVPN error code: \(nsError.code)")
 
         if isFatal {
+            appendTunnelLog("Fatal error — failing connection")
             log.error("Fatal OpenVPN error, failing connection")
             openVPNStartCompletion?(error)
             openVPNStartCompletion = nil
@@ -438,6 +543,7 @@ extension PacketTunnelProvider: OpenVPNAdapterDelegate {
     }
 
     func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, handleLogMessage logMessage: String) {
+        appendTunnelLog("OVPN: \(logMessage)")
         log.debug("OpenVPN: \(logMessage, privacy: .public)")
     }
 }

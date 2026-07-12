@@ -1,0 +1,4 @@
+module AmneziaWGKitC {
+    umbrella header "AmneziaWGKitC.h"
+    export *
+}

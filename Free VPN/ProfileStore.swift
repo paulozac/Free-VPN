@@ -54,7 +54,7 @@ final class ProfileStore {
 
         // Validate based on protocol type
         switch detectedProtocol {
-        case .wireGuard:
+        case .wireGuard, .amneziaWG:
             if let error = WireGuardConfig.validate(configString) {
                 return error
             }
@@ -69,7 +69,7 @@ final class ProfileStore {
         let displayName: String
 
         switch detectedProtocol {
-        case .wireGuard:
+        case .wireGuard, .amneziaWG:
             let config = try? WireGuardConfig.parse(from: configString)
             endpoint = config?.peers.first?.endpoint
             address = config?.interface.address.first

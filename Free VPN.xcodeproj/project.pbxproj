@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		C38F5FC62F8B2A0A00914D72 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */; };
 		C38F5FCB2F8B2B2500914D72 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */; };
+		C3F2068330031574008E13BF /* AmneziaWGKit in Frameworks */ = {isa = PBXBuildFile; productRef = C3F2068230031574008E13BF /* AmneziaWGKit */; };
 		C3F8A5DF2F8B78C8008A4180 /* Packet Tunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C3DC4E652F8B1F030056A4E5 /* Packet Tunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C3F8A5E42F8B7953008A4180 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = C3F8A5E32F8B7953008A4180 /* WireGuardKit */; };
 		C3F8A5E92F8C7B4A008A4180 /* OpenVPNAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = C3F8A5E82F8C7B4A008A4180 /* OpenVPNAdapter */; };
@@ -83,6 +84,7 @@
 				C3F8A5E42F8B7953008A4180 /* WireGuardKit in Frameworks */,
 				C3F8A5E92F8C7B4A008A4180 /* OpenVPNAdapter in Frameworks */,
 				C3F8A5EB2F8C7BC9008A4180 /* SystemConfiguration.framework in Frameworks */,
+				C3F2068330031574008E13BF /* AmneziaWGKit in Frameworks */,
 				C38F5FC62F8B2A0A00914D72 /* NetworkExtension.framework in Frameworks */,
 				C3F8A5ED2F8C7BDD008A4180 /* UIKit.framework in Frameworks */,
 			);
@@ -151,6 +153,7 @@
 			packageProductDependencies = (
 				C3F8A5E32F8B7953008A4180 /* WireGuardKit */,
 				C3F8A5E82F8C7B4A008A4180 /* OpenVPNAdapter */,
+				C3F2068230031574008E13BF /* AmneziaWGKit */,
 			);
 			productName = "Packet Tunnel";
 			productReference = C3DC4E652F8B1F030056A4E5 /* Packet Tunnel.appex */;
@@ -211,6 +214,7 @@
 				C38F5FCC2F8B2F0B00914D72 /* XCRemoteSwiftPackageReference "swift-algorithms" */,
 				C3F8A5DE2F8B77A2008A4180 /* XCLocalSwiftPackageReference "WireGuardKit" */,
 				C3F8A5E72F8C7B4A008A4180 /* XCLocalSwiftPackageReference "OpenVPNAdapter" */,
+				C3F20681300314B0008E13BF /* XCLocalSwiftPackageReference "AmneziaWGKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C3F27A552F889F05005BFB60 /* Products */;
@@ -282,7 +286,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn.PacketTunnel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -311,7 +315,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn.PacketTunnel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -378,8 +382,8 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 1.2;
-				"MARKETING_VERSION[sdk=*]" = 1.2;
+				MARKETING_VERSION = 1.6;
+				"MARKETING_VERSION[sdk=*]" = 1.6;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -438,7 +442,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.6;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = appletvos;
@@ -468,7 +472,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -501,7 +505,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -547,6 +551,10 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		C3F20681300314B0008E13BF /* XCLocalSwiftPackageReference "AmneziaWGKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = AmneziaWGKit;
+		};
 		C3F8A5DE2F8B77A2008A4180 /* XCLocalSwiftPackageReference "WireGuardKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = WireGuardKit;
@@ -569,6 +577,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		C3F2068230031574008E13BF /* AmneziaWGKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C3F20681300314B0008E13BF /* XCLocalSwiftPackageReference "AmneziaWGKit" */;
+			productName = AmneziaWGKit;
+		};
 		C3F8A5E32F8B7953008A4180 /* WireGuardKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C3F8A5DE2F8B77A2008A4180 /* XCLocalSwiftPackageReference "WireGuardKit" */;

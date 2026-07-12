@@ -55,8 +55,46 @@ final class VPNManager {
     private var tunnelManager: NETunnelProviderManager?
     private var statusObserver: NSObjectProtocol?
     private var statsTask: Task<Void, Never>?
+    private var logPollingTask: Task<Void, Never>?
+    private var lastTunnelLogCount = 0
 
     private let tunnelBundleIdentifier = "com.zacvpn.zacvpn.PacketTunnel"
+
+    // MARK: - Tunnel Extension Log Fetching
+
+    private func startLogPolling() {
+        stopLogPolling()
+        lastTunnelLogCount = 0
+        logPollingTask = Task {
+            while !Task.isCancelled {
+                fetchTunnelLogs()
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            }
+        }
+    }
+
+    private func stopLogPolling() {
+        logPollingTask?.cancel()
+        logPollingTask = nil
+    }
+
+    /// Fetches logs from the tunnel extension via shared UserDefaults (works even after extension terminates).
+    private func fetchTunnelLogs() {
+        let sharedDefaults = UserDefaults(suiteName: "group.com.zacvpn.zacvpn")
+        guard let logs = sharedDefaults?.stringArray(forKey: "tunnelLog"), !logs.isEmpty else { return }
+
+        // Only append new log entries
+        if logs.count > lastTunnelLogCount {
+            let newLogs = logs[lastTunnelLogCount...]
+            for entry in newLogs {
+                connectionLog.append("⚡ \(entry)")
+                if connectionLog.count > maxConnectionLogLines {
+                    connectionLog.removeFirst(connectionLog.count - maxConnectionLogLines)
+                }
+            }
+        }
+        lastTunnelLogCount = logs.count
+    }
 
     init() {
         Task {
@@ -68,6 +106,10 @@ final class VPNManager {
 
     func configure(with configString: String, protocolType: VPNProtocolType = .wireGuard, username: String? = nil, password: String? = nil) async {
         errorMessage = nil
+        connectionLog.removeAll()
+        lastTunnelLogCount = 0
+        // Clear shared tunnel logs from previous session
+        UserDefaults(suiteName: "group.com.zacvpn.zacvpn")?.removeObject(forKey: "tunnelLog")
         appendConnectionLog("Configuring VPN (\(protocolType.displayName)), config: \(configString.count) chars")
         if let username, !username.isEmpty {
             appendConnectionLog("Credentials: username provided")
@@ -77,6 +119,8 @@ final class VPNManager {
         switch protocolType {
         case .wireGuard:
             await configureWireGuard(configString: configString)
+        case .amneziaWG:
+            await configureAmneziaWG(configString: configString)
         case .openVPN:
             await configureOpenVPN(configString: configString, username: username, password: password)
         }
@@ -177,6 +221,31 @@ final class VPNManager {
 
         await saveTunnelConfiguration(
             serverAddress: config.peers.first?.endpoint ?? "Unknown",
+            providerConfig: providerConfig
+        )
+    }
+
+    // MARK: - AmneziaWG Configuration
+
+    private func configureAmneziaWG(configString: String) async {
+        // Use WireGuardConfig just for extracting endpoint/address for display
+        let config = try? WireGuardConfig.parse(from: configString)
+
+        if let endpoint = config?.peers.first?.endpoint {
+            serverAddress = endpoint
+            appendConnectionLog("Endpoint: \(endpoint)")
+        }
+
+        appendConnectionLog("AmneziaWG config (obfuscated WireGuard)")
+
+        // Pass raw config string to preserve AWG obfuscation params (Jc, Jmin, Jmax, S1, S2, H1-H4)
+        let providerConfig: [String: Any] = [
+            "protocolType": VPNProtocolType.amneziaWG.rawValue,
+            "wgQuickConfig": configString
+        ]
+
+        await saveTunnelConfiguration(
+            serverAddress: config?.peers.first?.endpoint ?? "Unknown",
             providerConfig: providerConfig
         )
     }
@@ -464,19 +533,32 @@ final class VPNManager {
             accumulatedIn = 0
             accumulatedOut = 0
             stopStatsPolling()
-            connectionLog.removeAll()
+            stopLogPolling()
+            // Fetch tunnel logs from shared storage (works even after extension terminates)
+            fetchTunnelLogs()
+            // Re-fetch after a short delay to catch any final writes
+            Task {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                fetchTunnelLogs()
+            }
         case .connecting:
             connectionState = .connecting
+            startLogPolling()
         case .connected:
             connectionState = .connected
             connectedDate = tunnelManager?.connection.connectedDate
             lookupServerLocation()
             startStatsPolling()
+            // Fetch final batch of logs then stop polling
+            fetchTunnelLogs()
+            stopLogPolling()
         case .reasserting:
             connectionState = .reasserting
             stopStatsPolling()
+            startLogPolling()
         case .disconnecting:
             connectionState = .disconnecting
+            startLogPolling()
         @unknown default:
             connectionState = .disconnected
         }

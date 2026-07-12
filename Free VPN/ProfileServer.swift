@@ -147,11 +147,18 @@ final class ProfileServer {
 
         // Detect protocol type and validate accordingly
         let lower = configValue.lowercased()
-        let isWireGuard = lower.contains("[interface]") && lower.contains("[peer]") && lower.contains("privatekey")
+        let isWireGuardFamily = lower.contains("[interface]") && lower.contains("[peer]") && lower.contains("privatekey")
         let hasClient = lower.components(separatedBy: .newlines).contains { $0.trimmingCharacters(in: .whitespaces) == "client" }
-        let isOpenVPN = !isWireGuard && (lower.contains("remote ") || lower.contains("<ca>") || hasClient)
+        let isOpenVPN = !isWireGuardFamily && (lower.contains("remote ") || lower.contains("<ca>") || hasClient)
+        let awgKeys = ["jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"]
+        let isAmneziaWG = isWireGuardFamily && configValue.components(separatedBy: .newlines).contains { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces).lowercased()
+            return awgKeys.contains { key in
+                trimmed.hasPrefix(key) && trimmed.dropFirst(key.count).trimmingCharacters(in: .whitespaces).hasPrefix("=")
+            }
+        }
 
-        if isWireGuard {
+        if isWireGuardFamily {
             if let validationError = WireGuardConfig.validate(configValue) {
                 sendErrorPage(message: validationError, on: connection)
                 return
@@ -163,7 +170,7 @@ final class ProfileServer {
             }
         }
 
-        let protocolName = isOpenVPN ? "OpenVPN" : "WireGuard"
+        let protocolName = isAmneziaWG ? "AmneziaWG" : isOpenVPN ? "OpenVPN" : "WireGuard"
 
         let username = (params["username"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let password = (params["password"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -281,6 +288,7 @@ final class ProfileServer {
     .detected{text-align:center;margin-top:10px;font-size:15px;font-weight:600;min-height:22px}
     .detected.wg{color:#34a853}
     .detected.ovpn{color:#e8710a}
+    .detected.awg{color:#7c3aed}
     .auth-section{display:none;margin-top:16px;padding:16px;background:#fff8e1;border:1.5px solid #ffe082;border-radius:12px}
     .auth-section.visible{display:block}
     .auth-section label.field{color:#e65100}
@@ -310,7 +318,7 @@ final class ProfileServer {
     </style></head><body>
     <div class="card">
     <h1>Zac VPN Connect</h1>
-    <p class="sub">Upload a WireGuard or OpenVPN profile to your Apple TV</p>
+    <p class="sub">Upload a WireGuard, AmneziaWG, or OpenVPN profile to your Apple TV</p>
     <div class="error" id="error"></div>
     <form method="POST" id="form" autocomplete="off">
     <label class="field" for="name">Profile Name (optional)</label>
@@ -331,12 +339,12 @@ final class ProfileServer {
     </div>
     <div class="paste-toggle" id="pasteToggle"><span class="arrow" id="arrow">&#9654;</span> Or paste config manually</div>
     <div class="paste-section" id="pasteSection">
-    <textarea name="config" id="config" placeholder="Paste WireGuard (.conf) or OpenVPN (.ovpn) config here..."></textarea>
+    <textarea name="config" id="config" placeholder="Paste WireGuard, AmneziaWG, or OpenVPN config here..."></textarea>
     </div>
     <input type="hidden" name="config" id="configHidden" disabled>
     <button type="submit" id="btn" disabled>Upload Profile</button>
     </form>
-    <p class="hint">Supports WireGuard and OpenVPN profiles.<br>Any file type accepted &mdash; content is validated automatically.</p>
+    <p class="hint">Supports WireGuard, AmneziaWG, and OpenVPN profiles.<br>Any file type accepted &mdash; content is validated automatically.</p>
     </div>
     <script>
     const config=document.getElementById('config'),file=document.getElementById('file'),
@@ -360,7 +368,10 @@ final class ProfileServer {
 
     function detectProtocol(c){
       const l=c.toLowerCase();
-      if(l.includes('[interface]')&&l.includes('[peer]')&&l.includes('privatekey'))return'wireguard';
+      if(l.includes('[interface]')&&l.includes('[peer]')&&l.includes('privatekey')){
+        if(/^(jc|jmin|jmax|s1|s2|h[1-4])\\s*=/im.test(c))return'amneziawg';
+        return'wireguard';
+      }
       if(l.includes('remote ')||l.includes('<ca>')||/^client\\s*$/m.test(l))return'openvpn';
       return null;
     }
@@ -382,8 +393,9 @@ final class ProfileServer {
       if(!c){btn.disabled=true;return}
 
       const proto=detectProtocol(c);
-      if(proto==='wireguard'){
-        detected.textContent='Detected: WireGuard';detected.className='detected wg';
+      if(proto==='wireguard'||proto==='amneziawg'){
+        detected.textContent=proto==='amneziawg'?'Detected: AmneziaWG':'Detected: WireGuard';
+        detected.className='detected '+(proto==='amneziawg'?'awg':'wg');
         if(!c.match(/PrivateKey\\s*=/i)){showError("Missing PrivateKey in [Interface] section.");btn.disabled=true;return}
         if(!c.match(/PublicKey\\s*=/i)){showError("Missing PublicKey in [Peer] section.");btn.disabled=true;return}
       }else if(proto==='openvpn'){
@@ -397,7 +409,7 @@ final class ProfileServer {
           }
         }
       }else{
-        showError("This doesn't look like a valid WireGuard or OpenVPN config file. Please check your file and try again.");
+        showError("This doesn't look like a valid WireGuard, AmneziaWG, or OpenVPN config file. Please check your file and try again.");
         btn.disabled=true;return;
       }
       errorDiv.style.display='none';
