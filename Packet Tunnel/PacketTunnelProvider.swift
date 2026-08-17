@@ -10,6 +10,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private lazy var wireGuardAdapter: WireGuardKit.WireGuardAdapter = {
         return WireGuardKit.WireGuardAdapter(with: self) { [weak self] logLevel, message in
             self?.log.log(level: logLevel == .error ? .error : .debug, "\(message, privacy: .public)")
+            self?.appendTunnelLog("WG: \(message)")
         }
     }()
 
@@ -33,6 +34,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var openVPNStartCompletion: ((Error?) -> Void)?
     private var tunnelLog: [String] = []
     private static let sharedDefaults = UserDefaults(suiteName: "group.com.zacvpn.zacvpn")
+    private let logQueue = DispatchQueue(label: "com.zacvpn.tunnelLog")
     private let tunnelLogDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
@@ -40,19 +42,22 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }()
 
     private func appendTunnelLog(_ message: String) {
-        let ts = tunnelLogDateFormatter.string(from: Date())
-        let entry = "[\(ts)] \(message)"
-        tunnelLog.append(entry)
-        // Keep at most 500 entries
-        if tunnelLog.count > 500 {
-            tunnelLog.removeFirst(tunnelLog.count - 500)
+        logQueue.async { [weak self] in
+            guard let self else { return }
+            let ts = self.tunnelLogDateFormatter.string(from: Date())
+            let entry = "[\(ts)] \(message)"
+            self.tunnelLog.append(entry)
+            // Keep at most 500 entries
+            if self.tunnelLog.count > 500 {
+                self.tunnelLog.removeFirst(self.tunnelLog.count - 500)
+            }
+            // Persist to shared UserDefaults so app can read even after extension terminates
+            Self.sharedDefaults?.set(self.tunnelLog, forKey: "tunnelLog")
         }
-        // Persist to shared UserDefaults so app can read even after extension terminates
-        Self.sharedDefaults?.set(tunnelLog, forKey: "tunnelLog")
     }
 
     override func startTunnel(options: [String: NSObject]? = nil) async throws {
-        tunnelLog.removeAll()
+        logQueue.sync { tunnelLog.removeAll() }
         appendTunnelLog("Tunnel extension starting")
 
         guard let protocolConfig = protocolConfiguration as? NETunnelProviderProtocol,
@@ -102,7 +107,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func handleAppMessage(_ messageData: Data) async -> Data? {
         // Return collected tunnel logs as JSON
-        return try? JSONEncoder().encode(tunnelLog)
+        return logQueue.sync { try? JSONEncoder().encode(tunnelLog) }
     }
 
     /// Resolves a persistent Keychain reference to retrieve the stored password.
@@ -140,25 +145,42 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         log.info("WireGuard config received (\(wgQuickConfig.count) chars)")
+        appendTunnelLog("WG config received (\(wgQuickConfig.count) chars)")
 
         let tunnelConfig: WireGuardKit.TunnelConfiguration
         do {
             tunnelConfig = try WireGuardKit.TunnelConfiguration(fromWgQuickConfig: wgQuickConfig, called: "ZacVPN")
         } catch {
             log.error("Failed to parse WireGuard config: \(error.localizedDescription)")
+            appendTunnelLog("WG ERROR: Failed to parse config: \(error.localizedDescription)")
             throw NEVPNError(.configurationInvalid)
         }
 
+        // Log parsed config details for debugging
+        let iface = tunnelConfig.interface
+        appendTunnelLog("WG interface: addresses=\(iface.addresses.map { $0.stringRepresentation })")
+        appendTunnelLog("WG interface: dns=\(iface.dns.map { $0.stringRepresentation })")
+        appendTunnelLog("WG interface: mtu=\(iface.mtu.map { String($0) } ?? "auto")")
+        for (idx, peer) in tunnelConfig.peers.enumerated() {
+            appendTunnelLog("WG peer[\(idx)]: endpoint=\(peer.endpoint?.stringRepresentation ?? "none")")
+            appendTunnelLog("WG peer[\(idx)]: allowedIPs=\(peer.allowedIPs.map { $0.stringRepresentation })")
+            appendTunnelLog("WG peer[\(idx)]: keepalive=\(peer.persistentKeepAlive.map { String($0) } ?? "none")")
+        }
+
+        appendTunnelLog("WG starting adapter...")
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            wireGuardAdapter.start(tunnelConfiguration: tunnelConfig) { error in
+            wireGuardAdapter.start(tunnelConfiguration: tunnelConfig) { [weak self] error in
                 if let error = error {
+                    self?.appendTunnelLog("WG ERROR: adapter start failed: \(error)")
                     continuation.resume(throwing: error)
                 } else {
+                    self?.appendTunnelLog("WG adapter started OK")
                     continuation.resume()
                 }
             }
         }
 
+        appendTunnelLog("WG tunnel started successfully")
         log.info("WireGuard tunnel started successfully")
     }
 
@@ -173,32 +195,68 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         log.info("AmneziaWG config received (\(wgQuickConfig.count) chars)")
         appendTunnelLog("AmneziaWG config received (\(wgQuickConfig.count) chars)")
 
+        // Log the raw config lines (excluding private key) for debugging
+        for line in wgQuickConfig.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let lower = trimmed.lowercased()
+            if lower.hasPrefix("privatekey") {
+                appendTunnelLog("AWG raw: PrivateKey = [REDACTED]")
+            } else if !trimmed.isEmpty {
+                appendTunnelLog("AWG raw: \(trimmed)")
+            }
+        }
+
         let tunnelConfig: AmneziaWGKit.TunnelConfiguration
         do {
             tunnelConfig = try AmneziaWGKit.TunnelConfiguration(fromWgQuickConfig: wgQuickConfig, called: "ZacVPN-AWG")
         } catch {
             log.error("Failed to parse AmneziaWG config: \(error.localizedDescription)")
-            appendTunnelLog("ERROR: Failed to parse AmneziaWG config: \(error.localizedDescription)")
+            appendTunnelLog("ERROR: Failed to parse AmneziaWG config: \(error)")
             throw NEVPNError(.configurationInvalid)
         }
 
-        // Log obfuscation parameters
+        // Log parsed interface details (same detail as WG)
         let iface = tunnelConfig.interface
+        appendTunnelLog("AWG interface: addresses=\(iface.addresses.map { $0.stringRepresentation })")
+        appendTunnelLog("AWG interface: dns=\(iface.dns.map { $0.stringRepresentation })")
+        appendTunnelLog("AWG interface: mtu=\(iface.mtu.map { String($0) } ?? "auto")")
+
+        // Log obfuscation parameters
+        let hasAnyAWGParam = iface.junkPacketCount != nil || iface.initPacketMagicHeader != nil
+        appendTunnelLog("AWG obfuscation params present: \(hasAnyAWGParam)")
         if let jc = iface.junkPacketCount { appendTunnelLog("AWG Jc=\(jc)") }
         if let jmin = iface.junkPacketMinSize { appendTunnelLog("AWG Jmin=\(jmin)") }
         if let jmax = iface.junkPacketMaxSize { appendTunnelLog("AWG Jmax=\(jmax)") }
         if let s1 = iface.initPacketJunkSize { appendTunnelLog("AWG S1=\(s1)") }
         if let s2 = iface.responsePacketJunkSize { appendTunnelLog("AWG S2=\(s2)") }
+        if let s3 = iface.cookiePacketJunkSize { appendTunnelLog("AWG S3=\(s3)") }
+        if let s4 = iface.transportPacketJunkSize { appendTunnelLog("AWG S4=\(s4)") }
         if let h1 = iface.initPacketMagicHeader { appendTunnelLog("AWG H1=\(h1)") }
         if let h2 = iface.responsePacketMagicHeader { appendTunnelLog("AWG H2=\(h2)") }
         if let h3 = iface.underloadPacketMagicHeader { appendTunnelLog("AWG H3=\(h3)") }
         if let h4 = iface.transportPacketMagicHeader { appendTunnelLog("AWG H4=\(h4)") }
+        if let i1 = iface.initPacketData1 { appendTunnelLog("AWG I1=\(i1)") }
+        if let i2 = iface.initPacketData2 { appendTunnelLog("AWG I2=\(i2)") }
+        if let i3 = iface.initPacketData3 { appendTunnelLog("AWG I3=\(i3)") }
+        if let i4 = iface.initPacketData4 { appendTunnelLog("AWG I4=\(i4)") }
+        if let i5 = iface.initPacketData5 { appendTunnelLog("AWG I5=\(i5)") }
 
+        // Log peer details
+        for (idx, peer) in tunnelConfig.peers.enumerated() {
+            appendTunnelLog("AWG peer[\(idx)]: endpoint=\(peer.endpoint?.stringRepresentation ?? "none")")
+            appendTunnelLog("AWG peer[\(idx)]: allowedIPs=\(peer.allowedIPs.map { $0.stringRepresentation })")
+            appendTunnelLog("AWG peer[\(idx)]: keepalive=\(peer.persistentKeepAlive.map { String($0) } ?? "none")")
+        }
+
+        appendTunnelLog("AWG starting adapter...")
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            amneziaWGAdapter.start(tunnelConfiguration: tunnelConfig) { error in
+            amneziaWGAdapter.start(tunnelConfiguration: tunnelConfig) { [weak self] error in
                 if let error = error {
+                    self?.appendTunnelLog("AWG ERROR: adapter start failed: \(error)")
+                    self?.log.error("AWG adapter start failed: \(error.localizedDescription)")
                     continuation.resume(throwing: error)
                 } else {
+                    self?.appendTunnelLog("AWG adapter started OK")
                     continuation.resume()
                 }
             }

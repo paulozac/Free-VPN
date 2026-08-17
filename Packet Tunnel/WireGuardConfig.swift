@@ -116,11 +116,11 @@ extension WireGuardConfig {
                 case "privatekey":
                     privateKey = value
                 case "address":
-                    addresses = value.split(separator: ",").map {
+                    addresses.append(contentsOf: value.split(separator: ",").map {
                         normalizeCIDR($0.trimmingCharacters(in: .whitespaces))
-                    }
+                    })
                 case "dns":
-                    dnsServers = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                    dnsServers.append(contentsOf: value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
                 case "mtu":
                     mtu = Int(value)
                 case "listenport":

@@ -44,6 +44,7 @@ struct ContentView: View {
     @State private var showUploadingPopup = false
     @State private var uploadProgress: Double = 0
     @State private var uploadedProfileID: UUID?
+    @FocusState private var focusedLogIndex: Int?
 
     var body: some View {
         NavigationStack {
@@ -491,9 +492,28 @@ struct ContentView: View {
             }
             .animation(.easeInOut(duration: 0.3), value: showUploadingPopup)
             .fullScreenCover(isPresented: $showingLogs) {
-                NavigationStack {
+                VStack(spacing: 0) {
+                    // Fixed banner at top
+                    HStack {
+                        Text("Press Back (\u{276E}) to return")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("Connection Logs")
+                            .font(.headline)
+                        Spacer()
+                        // Balance the layout
+                        Text("Press Back (\u{276E}) to return")
+                            .font(.caption)
+                            .foregroundStyle(.clear)
+                    }
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial)
+
+                    // Scrollable log content
                     ScrollViewReader { proxy in
-                        ScrollView([.horizontal, .vertical]) {
+                        ScrollView(.vertical, showsIndicators: true) {
                             VStack(alignment: .leading, spacing: 2) {
                                 if vpnManager.connectionLog.isEmpty {
                                     Text("No logs yet. Connect to a VPN profile to see activity.")
@@ -502,45 +522,42 @@ struct ContentView: View {
                                 } else {
                                     ForEach(Array(vpnManager.connectionLog.enumerated()), id: \.offset) { index, line in
                                         Text(line)
-                                            .font(.system(.body, design: .monospaced))
+                                            .font(.system(.caption, design: .monospaced))
                                             .foregroundStyle(line.contains("ERROR") ? .red : line.contains("State:") ? .primary : .secondary)
-                                            .fixedSize(horizontal: true, vertical: false)
+                                            .focusable()
+                                            .focused($focusedLogIndex, equals: index)
                                             .id(index)
                                     }
                                 }
                             }
-                            .padding(40)
-                            .frame(minWidth: 800, alignment: .leading)
+                            .padding(.horizontal, 40)
+                            .padding(.vertical, 20)
                         }
-                        .focusable()
                         .onChange(of: vpnManager.connectionLog.count) {
                             if let last = vpnManager.connectionLog.indices.last {
-                                withAnimation {
+                                focusedLogIndex = last
+                                proxy.scrollTo(last, anchor: .bottom)
+                            }
+                        }
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                if let last = vpnManager.connectionLog.indices.last {
+                                    focusedLogIndex = last
                                     proxy.scrollTo(last, anchor: .bottom)
                                 }
                             }
                         }
-                        .onAppear {
-                            if let last = vpnManager.connectionLog.indices.last {
-                                proxy.scrollTo(last, anchor: .bottom)
-                            }
-                        }
-                    }
-                    .navigationTitle("Connection Logs")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Close") { showingLogs = false }
-                        }
                     }
                 }
                 .background(Color.black)
-                .ignoresSafeArea()
+                .ignoresSafeArea(edges: .bottom)
             }
             .onAppear {
                 startServer()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
+                    showingLogs = false
                     startServer()
                 } else {
                     profileServer.stop()
@@ -592,7 +609,6 @@ struct ContentView: View {
                     profileStore.selectProfile(profile)
                     uploadedProfileID = profile.id
                     focusedProfileID = profile.id
-                    connectToProfile(profile)
                 }
             }
         }

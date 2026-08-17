@@ -18,7 +18,7 @@ let package = Package(
             dependencies: ["AmneziaWGKitGo", "AmneziaWGKitC"],
             linkerSettings: [
                 .unsafeFlags(["-L\(Context.packageDirectory)/Sources/AmneziaWGKitGo"]),
-                .linkedLibrary("wg-go")
+                .linkedLibrary("awg-go")
             ]
         ),
         .target(

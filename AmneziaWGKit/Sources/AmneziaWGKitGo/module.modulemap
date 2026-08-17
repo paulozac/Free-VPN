@@ -1,5 +1,5 @@
 module AmneziaWGKitGo {
     umbrella header "wireguard.h"
-    link "wg-go"
+    link "awg-go"
     export *
 }

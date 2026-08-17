@@ -12,10 +12,17 @@ public struct InterfaceConfiguration {
     public var junkPacketMaxSize: UInt16?
     public var initPacketJunkSize: UInt16?
     public var responsePacketJunkSize: UInt16?
-    public var initPacketMagicHeader: UInt32?
-    public var responsePacketMagicHeader: UInt32?
-    public var underloadPacketMagicHeader: UInt32?
-    public var transportPacketMagicHeader: UInt32?
+    public var cookiePacketJunkSize: UInt16?       // S3 (AWG v2)
+    public var transportPacketJunkSize: UInt16?    // S4 (AWG v2)
+    public var initPacketMagicHeader: String?      // H1 - String to support AWG v2 ranges ("min-max")
+    public var responsePacketMagicHeader: String?   // H2
+    public var underloadPacketMagicHeader: String?  // H3
+    public var transportPacketMagicHeader: String?  // H4
+    public var initPacketData1: String?             // I1 (AWG v2 concealment)
+    public var initPacketData2: String?             // I2
+    public var initPacketData3: String?             // I3
+    public var initPacketData4: String?             // I4
+    public var initPacketData5: String?             // I5
     public var listenPort: UInt16?
     public var mtu: UInt16?
     public var dns = [DNSServer]()
@@ -42,9 +49,16 @@ extension InterfaceConfiguration: Equatable {
             lhs.junkPacketMaxSize == rhs.junkPacketMaxSize &&
             lhs.initPacketJunkSize == rhs.initPacketJunkSize &&
             lhs.responsePacketJunkSize == rhs.responsePacketJunkSize &&
+            lhs.cookiePacketJunkSize == rhs.cookiePacketJunkSize &&
+            lhs.transportPacketJunkSize == rhs.transportPacketJunkSize &&
             lhs.initPacketMagicHeader == rhs.initPacketMagicHeader &&
             lhs.responsePacketMagicHeader == rhs.responsePacketMagicHeader &&
             lhs.underloadPacketMagicHeader == rhs.underloadPacketMagicHeader &&
-            lhs.transportPacketMagicHeader == rhs.transportPacketMagicHeader
+            lhs.transportPacketMagicHeader == rhs.transportPacketMagicHeader &&
+            lhs.initPacketData1 == rhs.initPacketData1 &&
+            lhs.initPacketData2 == rhs.initPacketData2 &&
+            lhs.initPacketData3 == rhs.initPacketData3 &&
+            lhs.initPacketData4 == rhs.initPacketData4 &&
+            lhs.initPacketData5 == rhs.initPacketData5
     }
 }

@@ -269,6 +269,7 @@ final class ProfileServer {
     <!DOCTYPE html>
     <html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
     <meta name="theme-color" content="#f5f5f5">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
     *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
     body{font-family:-apple-system,system-ui,'Roboto',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px;background:#f5f5f5;color:#212121}
@@ -324,7 +325,7 @@ final class ProfileServer {
     <label class="field" for="name">Profile Name (optional)</label>
     <input type="text" name="name" id="name" placeholder="e.g. Home Server, US East, Work VPN">
     <label class="file-label" for="file" id="fileLabel">&#128193; Choose VPN config file</label>
-    <input type="file" id="file" accept=".conf,.ovpn,.txt,text/*,application/octet-stream">
+    <input type="file" id="file" accept=".conf,.ovpn,.txt,.zip,text/*,application/octet-stream,application/zip">
     <div class="file-name" id="fileName"></div>
     <div class="detected" id="detected"></div>
     <div class="auth-section" id="authSection">
@@ -344,7 +345,7 @@ final class ProfileServer {
     <input type="hidden" name="config" id="configHidden" disabled>
     <button type="submit" id="btn" disabled>Upload Profile</button>
     </form>
-    <p class="hint">Supports WireGuard, AmneziaWG, and OpenVPN profiles.<br>Any file type accepted &mdash; content is validated automatically.</p>
+    <p class="hint">Supports WireGuard, AmneziaWG, and OpenVPN profiles.<br>ZIP archives with certificates are automatically resolved.<br>Any file type accepted &mdash; content is validated automatically.</p>
     </div>
     <script>
     const config=document.getElementById('config'),file=document.getElementById('file'),
@@ -432,20 +433,85 @@ final class ProfileServer {
       this.textContent=isHidden?'\\u{1F648}':'\\u{1F441}';
     });
 
-    file.addEventListener('change',function(){
-      if(this.files[0]){
-        const f=this.files[0];
-        fileName.textContent=f.name;
-        fileLabel.classList.add('active');
-        fileLabel.innerHTML='&#10003; '+f.name;
-        if(!nameField.value.trim()){
-          nameField.value=f.name.replace(/\\.[^.]+$/,'');
+    function resolveExternalRefs(ovpn,files){
+      var lines=ovpn.split('\\n'),result=[],blocks=[];
+      var directives=['ca','cert','key','tls-auth','tls-crypt'];
+      for(var i=0;i<lines.length;i++){
+        var trimmed=lines[i].trim();
+        if(!trimmed||trimmed[0]==='#'||trimmed[0]===';'){result.push(lines[i]);continue}
+        var matched=false;
+        for(var d=0;d<directives.length;d++){
+          var dir=directives[d];
+          var re=new RegExp('^'+dir.replace('-','\\\\-')+'\\\\s+(.+)$','i');
+          var m=trimmed.match(re);
+          if(m){
+            var ref=m[1].trim().replace(/["']/g,'');
+            if(ref.startsWith('['))break;
+            var refLower=ref.toLowerCase();
+            var baseName=ref.split('/').pop().toLowerCase();
+            var content=files[refLower]||files[baseName];
+            if(content){
+              if(dir==='tls-auth'){
+                var parts=ref.split(/\\s+/);
+                if(parts.length>1)result.push('key-direction '+parts[parts.length-1]);
+              }
+              blocks.push({name:dir,content:content.trim()});
+              matched=true;
+            }
+            break;
+          }
         }
-        const r=new FileReader();
+        if(!matched)result.push(lines[i]);
+      }
+      var out=result.join('\\n');
+      for(var b=0;b<blocks.length;b++){
+        out+='\\n<'+blocks[b].name+'>\\n'+blocks[b].content+'\\n</'+blocks[b].name+'>';
+      }
+      return out;
+    }
+
+    file.addEventListener('change',function(){
+      if(!this.files[0])return;
+      var f=this.files[0];
+      fileName.textContent=f.name;
+      fileLabel.classList.add('active');
+      fileLabel.innerHTML='&#10003; '+f.name;
+      if(!nameField.value.trim()){
+        nameField.value=f.name.replace(/\\.[^.]+$/,'');
+      }
+      var isZip=f.name.toLowerCase().endsWith('.zip')||f.type==='application/zip';
+      if(isZip&&typeof JSZip!=='undefined'){
+        var r=new FileReader();
         r.onload=function(e){
-          const content=e.target.result;
-          configHidden.value=content;
-          config.value=content;
+          JSZip.loadAsync(e.target.result).then(function(zip){
+            var ovpnName=null,ovpnContent=null,fileContents={},promises=[];
+            zip.forEach(function(path,entry){
+              if(entry.dir)return;
+              var base=path.split('/').pop();
+              promises.push(entry.async('string').then(function(c){
+                fileContents[base.toLowerCase()]=c;
+                fileContents[path.toLowerCase()]=c;
+                if(base.toLowerCase().endsWith('.ovpn')){ovpnName=base;ovpnContent=c;}
+              }));
+            });
+            Promise.all(promises).then(function(){
+              if(!ovpnContent){showError('No .ovpn file found in the ZIP archive.');btn.disabled=true;return}
+              if(nameField.value===f.name.replace(/\\.[^.]+$/,'')){
+                nameField.value=ovpnName.replace(/\\.[^.]+$/,'');
+              }
+              var resolved=resolveExternalRefs(ovpnContent,fileContents);
+              configHidden.value=resolved;
+              config.value=resolved;
+              validate();
+            });
+          }).catch(function(err){showError('Failed to read ZIP: '+err.message);btn.disabled=true;});
+        };
+        r.readAsArrayBuffer(f);
+      }else{
+        var r=new FileReader();
+        r.onload=function(e){
+          configHidden.value=e.target.result;
+          config.value=e.target.result;
           validate();
         };
         r.readAsText(f);

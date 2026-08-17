@@ -63,6 +63,12 @@ class PacketTunnelSettingsGenerator {
         if let responsePacketJunkSize = tunnelConfiguration.interface.responsePacketJunkSize {
             wgSettings.append("s2=\(responsePacketJunkSize)\n")
         }
+        if let cookiePacketJunkSize = tunnelConfiguration.interface.cookiePacketJunkSize {
+            wgSettings.append("s3=\(cookiePacketJunkSize)\n")
+        }
+        if let transportPacketJunkSize = tunnelConfiguration.interface.transportPacketJunkSize {
+            wgSettings.append("s4=\(transportPacketJunkSize)\n")
+        }
         if let initPacketMagicHeader = tunnelConfiguration.interface.initPacketMagicHeader {
             wgSettings.append("h1=\(initPacketMagicHeader)\n")
         }
@@ -74,6 +80,21 @@ class PacketTunnelSettingsGenerator {
         }
         if let transportPacketMagicHeader = tunnelConfiguration.interface.transportPacketMagicHeader {
             wgSettings.append("h4=\(transportPacketMagicHeader)\n")
+        }
+        if let initPacketData1 = tunnelConfiguration.interface.initPacketData1 {
+            wgSettings.append("i1=\(initPacketData1)\n")
+        }
+        if let initPacketData2 = tunnelConfiguration.interface.initPacketData2 {
+            wgSettings.append("i2=\(initPacketData2)\n")
+        }
+        if let initPacketData3 = tunnelConfiguration.interface.initPacketData3 {
+            wgSettings.append("i3=\(initPacketData3)\n")
+        }
+        if let initPacketData4 = tunnelConfiguration.interface.initPacketData4 {
+            wgSettings.append("i4=\(initPacketData4)\n")
+        }
+        if let initPacketData5 = tunnelConfiguration.interface.initPacketData5 {
+            wgSettings.append("i5=\(initPacketData5)\n")
         }
         if !tunnelConfiguration.peers.isEmpty {
             wgSettings.append("replace_peers=true\n")

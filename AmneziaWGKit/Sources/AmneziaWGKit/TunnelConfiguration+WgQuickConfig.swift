@@ -75,7 +75,9 @@ extension TunnelConfiguration {
                     // may contain wg-quick extensions (Table, PostUp, PostDown, etc.)
                     let interfaceSectionKeys: Set<String> = [
                         "privatekey", "listenport", "address", "dns", "mtu",
-                        "jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"
+                        "jc", "jmin", "jmax", "s1", "s2", "s3", "s4",
+                        "h1", "h2", "h3", "h4",
+                        "i1", "i2", "i3", "i4", "i5"
                     ]
                     let peerSectionKeys: Set<String> = ["publickey", "presharedkey", "allowedips", "endpoint", "persistentkeepalive"]
                     if parserState == .inInterfaceSection {
@@ -177,10 +179,20 @@ extension TunnelConfiguration {
         if let val = attributes["jmax"] { interface.junkPacketMaxSize = UInt16(val) }
         if let val = attributes["s1"] { interface.initPacketJunkSize = UInt16(val) }
         if let val = attributes["s2"] { interface.responsePacketJunkSize = UInt16(val) }
-        if let val = attributes["h1"] { interface.initPacketMagicHeader = UInt32(val) }
-        if let val = attributes["h2"] { interface.responsePacketMagicHeader = UInt32(val) }
-        if let val = attributes["h3"] { interface.underloadPacketMagicHeader = UInt32(val) }
-        if let val = attributes["h4"] { interface.transportPacketMagicHeader = UInt32(val) }
+        if let val = attributes["s3"] { interface.cookiePacketJunkSize = UInt16(val) }
+        if let val = attributes["s4"] { interface.transportPacketJunkSize = UInt16(val) }
+        // H values passed as raw strings — Go's newMagicHeader() handles both
+        // single integers ("1234567890") and AWG v2 ranges ("min-max")
+        if let val = attributes["h1"] { interface.initPacketMagicHeader = val }
+        if let val = attributes["h2"] { interface.responsePacketMagicHeader = val }
+        if let val = attributes["h3"] { interface.underloadPacketMagicHeader = val }
+        if let val = attributes["h4"] { interface.transportPacketMagicHeader = val }
+        // I values: AWG v2 concealment packet data (passed as raw strings to Go)
+        if let val = attributes["i1"], !val.isEmpty { interface.initPacketData1 = val }
+        if let val = attributes["i2"], !val.isEmpty { interface.initPacketData2 = val }
+        if let val = attributes["i3"], !val.isEmpty { interface.initPacketData3 = val }
+        if let val = attributes["i4"], !val.isEmpty { interface.initPacketData4 = val }
+        if let val = attributes["i5"], !val.isEmpty { interface.initPacketData5 = val }
 
         return interface
     }
