@@ -96,6 +96,34 @@ class PacketTunnelSettingsGenerator {
         if let initPacketData5 = tunnelConfiguration.interface.initPacketData5 {
             wgSettings.append("i5=\(initPacketData5)\n")
         }
+        // AWG 3.1 device parameters
+        if let headerProtectionKey = tunnelConfiguration.interface.headerProtectionKey {
+            wgSettings.append("header_protection_key=\(headerProtectionKey)\n")
+        }
+        if let contentPaddingAddition = tunnelConfiguration.interface.contentPaddingAddition {
+            wgSettings.append("content_padding_addition=\(contentPaddingAddition)\n")
+        }
+        if let rekeyAfterTime = tunnelConfiguration.interface.rekeyAfterTime {
+            wgSettings.append("rekey_after_time=\(rekeyAfterTime)\n")
+        }
+        if let rekeyTimeout = tunnelConfiguration.interface.rekeyTimeout {
+            wgSettings.append("rekey_timeout=\(rekeyTimeout)\n")
+        }
+        if let rejectAfterTime = tunnelConfiguration.interface.rejectAfterTime {
+            wgSettings.append("reject_after_time=\(rejectAfterTime)\n")
+        }
+        if let keepaliveTimeout = tunnelConfiguration.interface.keepaliveTimeout {
+            wgSettings.append("keepalive_timeout=\(keepaliveTimeout)\n")
+        }
+        if let maxHandshakeAttempts = tunnelConfiguration.interface.maxHandshakeAttempts {
+            wgSettings.append("max_handshake_attempts=\(maxHandshakeAttempts)\n")
+        }
+        if let randomTrailers = tunnelConfiguration.interface.randomTrailers {
+            wgSettings.append("random_trailers=\(randomTrailers)\n")
+        }
+        if let disableCookies = tunnelConfiguration.interface.disableCookies {
+            wgSettings.append("disable_cookies=\(disableCookies)\n")
+        }
         if !tunnelConfiguration.peers.isEmpty {
             wgSettings.append("replace_peers=true\n")
         }

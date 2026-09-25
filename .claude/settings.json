@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "mcp__xcode-tools__XcodeRead",
+      "mcp__xcode-tools__XcodeGrep",
+      "mcp__xcode-tools__XcodeGlob",
+      "mcp__xcode-tools__XcodeLS",
+      "mcp__xcode-tools__XcodeListNavigatorIssues",
+      "mcp__xcode-tools__XcodeRefreshCodeIssuesInFile",
+      "mcp__xcode-tools__XcodeListTargets",
+      "mcp__xcode-tools__XcodeListSchemes",
+      "mcp__xcode-tools__GetBuildLog",
+      "mcp__xcode-tools__GetTargetBuildSettings",
+      "mcp__xcode-tools__DocumentationSearch",
+      "Bash(dns-sd -B *)",
+      "Bash(dns-sd -L *)",
+      "Bash(nm *)",
+      "Bash(system_profiler *)",
+      "Bash(defaults read *)",
+      "Bash(launchctl list)",
+      "Bash(launchctl list *)",
+      "Bash(launchctl print *)",
+      "Bash(plutil -p *)",
+      "Bash(plutil -lint *)",
+      "Bash(pmset -g)",
+      "Bash(pmset -g *)",
+      "Bash(dscl . -read *)",
+      "Bash(dscl . -list *)",
+      "Bash(otool *)",
+      "Bash(lipo -info *)",
+      "Bash(xcodebuild -version)",
+      "Bash(xcodebuild -showsdks)",
+      "Bash(xcrun simctl list *)",
+      "Bash(xcrun devicectl list *)"
+    ]
+  }
+}

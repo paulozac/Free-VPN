@@ -77,7 +77,11 @@ extension TunnelConfiguration {
                         "privatekey", "listenport", "address", "dns", "mtu",
                         "jc", "jmin", "jmax", "s1", "s2", "s3", "s4",
                         "h1", "h2", "h3", "h4",
-                        "i1", "i2", "i3", "i4", "i5"
+                        "i1", "i2", "i3", "i4", "i5",
+                        "headerprotectionkey", "contentpaddingaddition",
+                        "rekeyaftertime", "rekeytimeout", "rejectaftertime",
+                        "keepalivetimeout", "maxhandshakeattempts",
+                        "randomtrailers", "disablecookies"
                     ]
                     let peerSectionKeys: Set<String> = ["publickey", "presharedkey", "allowedips", "endpoint", "persistentkeepalive"]
                     if parserState == .inInterfaceSection {
@@ -193,6 +197,18 @@ extension TunnelConfiguration {
         if let val = attributes["i3"], !val.isEmpty { interface.initPacketData3 = val }
         if let val = attributes["i4"], !val.isEmpty { interface.initPacketData4 = val }
         if let val = attributes["i5"], !val.isEmpty { interface.initPacketData5 = val }
+        // AWG 3.1 parameters: header protection, content padding and randomized
+        // timers. Passed through verbatim — Go accepts single values, "min-max"
+        // ranges and on/off toggles depending on the parameter.
+        if let val = attributes["headerprotectionkey"], !val.isEmpty { interface.headerProtectionKey = val }
+        if let val = attributes["contentpaddingaddition"], !val.isEmpty { interface.contentPaddingAddition = val }
+        if let val = attributes["rekeyaftertime"], !val.isEmpty { interface.rekeyAfterTime = val }
+        if let val = attributes["rekeytimeout"], !val.isEmpty { interface.rekeyTimeout = val }
+        if let val = attributes["rejectaftertime"], !val.isEmpty { interface.rejectAfterTime = val }
+        if let val = attributes["keepalivetimeout"], !val.isEmpty { interface.keepaliveTimeout = val }
+        if let val = attributes["maxhandshakeattempts"], !val.isEmpty { interface.maxHandshakeAttempts = val }
+        if let val = attributes["randomtrailers"], !val.isEmpty { interface.randomTrailers = val }
+        if let val = attributes["disablecookies"], !val.isEmpty { interface.disableCookies = val }
 
         return interface
     }

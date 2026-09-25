@@ -23,6 +23,18 @@ public struct InterfaceConfiguration {
     public var initPacketData3: String?             // I3
     public var initPacketData4: String?             // I4
     public var initPacketData5: String?             // I5
+    // AWG 3.1 parameters. Kept as raw strings because their values are either
+    // ranges ("min-max"), single integers, or on/off toggles — the Go device
+    // parses all three forms, so there is nothing to gain by typing them here.
+    public var headerProtectionKey: String?         // HeaderProtectionKey (needs S1-S4 >= 12)
+    public var contentPaddingAddition: String?      // ContentPaddingAddition
+    public var rekeyAfterTime: String?              // RekeyAfterTime
+    public var rekeyTimeout: String?                // RekeyTimeout
+    public var rejectAfterTime: String?             // RejectAfterTime
+    public var keepaliveTimeout: String?            // KeepaliveTimeout
+    public var maxHandshakeAttempts: String?        // MaxHandshakeAttempts
+    public var randomTrailers: String?              // RandomTrailers (on/off)
+    public var disableCookies: String?              // DisableCookies (on/off)
     public var listenPort: UInt16?
     public var mtu: UInt16?
     public var dns = [DNSServer]()
@@ -59,6 +71,15 @@ extension InterfaceConfiguration: Equatable {
             lhs.initPacketData2 == rhs.initPacketData2 &&
             lhs.initPacketData3 == rhs.initPacketData3 &&
             lhs.initPacketData4 == rhs.initPacketData4 &&
-            lhs.initPacketData5 == rhs.initPacketData5
+            lhs.initPacketData5 == rhs.initPacketData5 &&
+            lhs.headerProtectionKey == rhs.headerProtectionKey &&
+            lhs.contentPaddingAddition == rhs.contentPaddingAddition &&
+            lhs.rekeyAfterTime == rhs.rekeyAfterTime &&
+            lhs.rekeyTimeout == rhs.rekeyTimeout &&
+            lhs.rejectAfterTime == rhs.rejectAfterTime &&
+            lhs.keepaliveTimeout == rhs.keepaliveTimeout &&
+            lhs.maxHandshakeAttempts == rhs.maxHandshakeAttempts &&
+            lhs.randomTrailers == rhs.randomTrailers &&
+            lhs.disableCookies == rhs.disableCookies
     }
 }

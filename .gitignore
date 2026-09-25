@@ -1,0 +1,11 @@
+# Xcode per-user state (window layout, scheme order, breakpoints)
+xcuserdata/
+*.xcuserstate
+
+# Build output
+DerivedData/
+build/
+.build/
+
+# macOS Finder metadata
+.DS_Store

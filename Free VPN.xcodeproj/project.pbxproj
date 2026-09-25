@@ -9,15 +9,24 @@
 /* Begin PBXBuildFile section */
 		C38F5FC62F8B2A0A00914D72 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */; };
 		C38F5FCB2F8B2B2500914D72 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */; };
-		C3F2068330031574008E13BF /* AmneziaWGKit in Frameworks */ = {isa = PBXBuildFile; productRef = C3F2068230031574008E13BF /* AmneziaWGKit */; };
 		C3F8A5DF2F8B78C8008A4180 /* Packet Tunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C3DC4E652F8B1F030056A4E5 /* Packet Tunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C3F8A5E42F8B7953008A4180 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = C3F8A5E32F8B7953008A4180 /* WireGuardKit */; };
 		C3F8A5E92F8C7B4A008A4180 /* OpenVPNAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = C3F8A5E82F8C7B4A008A4180 /* OpenVPNAdapter */; };
 		C3F8A5EB2F8C7BC9008A4180 /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3F8A5EA2F8C7BC9008A4180 /* SystemConfiguration.framework */; };
 		C3F8A5ED2F8C7BDD008A4180 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3F8A5EC2F8C7BDD008A4180 /* UIKit.framework */; };
+		18E5AA013065F900008D9C01 /* AmneziaWGKit in Frameworks */ = {isa = PBXBuildFile; productRef = C3F2068230031574008E13BF /* AmneziaWGKit */; };
+		18E5AA023065F900008D9C02 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */; };
+		18E5AA033065F900008D9C03 /* Amnezia Tunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 18E58E493065F81D008D9C00 /* Amnezia Tunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		18E58E4E3065F81D008D9C00 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C3F27A4C2F889F05005BFB60 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 18E58E483065F81D008D9C00;
+			remoteInfo = "Amnezia Tunnel";
+		};
 		C3F8A5E02F8B78C8008A4180 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C3F27A4C2F889F05005BFB60 /* Project object */;
@@ -35,6 +44,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				C3F8A5DF2F8B78C8008A4180 /* Packet Tunnel.appex in Embed Foundation Extensions */,
+				18E5AA033065F900008D9C03 /* Amnezia Tunnel.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -42,6 +52,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		18E58E493065F81D008D9C00 /* Amnezia Tunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Amnezia Tunnel.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38F5FC92F8B2A2A00914D72 /* Network.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Network.framework; path = System/Library/Frameworks/Network.framework; sourceTree = SDKROOT; };
 		C3DC4E652F8B1F030056A4E5 /* Packet Tunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Packet Tunnel.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NetworkExtension.framework; path = System/Library/Frameworks/NetworkExtension.framework; sourceTree = SDKROOT; };
@@ -51,6 +62,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		18E58E543065F81D008D9C00 /* Exceptions for "Amnezia Tunnel" folder in "Amnezia Tunnel" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 18E58E483065F81D008D9C00 /* Amnezia Tunnel */;
+		};
 		C3DC4E712F8B1F040056A4E5 /* Exceptions for "Packet Tunnel" folder in "Packet Tunnel" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -61,6 +79,14 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		18E58E4A3065F81D008D9C00 /* Amnezia Tunnel */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				18E58E543065F81D008D9C00 /* Exceptions for "Amnezia Tunnel" folder in "Amnezia Tunnel" target */,
+			);
+			path = "Amnezia Tunnel";
+			sourceTree = "<group>";
+		};
 		C3DC4E692F8B1F040056A4E5 /* Packet Tunnel */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -77,6 +103,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		18E58E463065F81D008D9C00 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				18E5AA013065F900008D9C01 /* AmneziaWGKit in Frameworks */,
+				18E5AA023065F900008D9C02 /* NetworkExtension.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C3DC4E622F8B1F030056A4E5 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -84,7 +119,6 @@
 				C3F8A5E42F8B7953008A4180 /* WireGuardKit in Frameworks */,
 				C3F8A5E92F8C7B4A008A4180 /* OpenVPNAdapter in Frameworks */,
 				C3F8A5EB2F8C7BC9008A4180 /* SystemConfiguration.framework in Frameworks */,
-				C3F2068330031574008E13BF /* AmneziaWGKit in Frameworks */,
 				C38F5FC62F8B2A0A00914D72 /* NetworkExtension.framework in Frameworks */,
 				C3F8A5ED2F8C7BDD008A4180 /* UIKit.framework in Frameworks */,
 			);
@@ -117,6 +151,7 @@
 			children = (
 				C3F27A562F889F05005BFB60 /* Free VPN */,
 				C3DC4E692F8B1F040056A4E5 /* Packet Tunnel */,
+				18E58E4A3065F81D008D9C00 /* Amnezia Tunnel */,
 				C3DC4E662F8B1F030056A4E5 /* Frameworks */,
 				C3F27A552F889F05005BFB60 /* Products */,
 			);
@@ -127,6 +162,7 @@
 			children = (
 				C3F27A542F889F05005BFB60 /* Free VPN.app */,
 				C3DC4E652F8B1F030056A4E5 /* Packet Tunnel.appex */,
+				18E58E493065F81D008D9C00 /* Amnezia Tunnel.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -134,6 +170,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		18E58E483065F81D008D9C00 /* Amnezia Tunnel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 18E58E553065F81D008D9C00 /* Build configuration list for PBXNativeTarget "Amnezia Tunnel" */;
+			buildPhases = (
+				18E58E453065F81D008D9C00 /* Sources */,
+				18E58E463065F81D008D9C00 /* Frameworks */,
+				18E58E473065F81D008D9C00 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				18E58E4A3065F81D008D9C00 /* Amnezia Tunnel */,
+			);
+			name = "Amnezia Tunnel";
+			packageProductDependencies = (
+				C3F2068230031574008E13BF /* AmneziaWGKit */,
+			);
+			productName = "Amnezia Tunnel";
+			productReference = 18E58E493065F81D008D9C00 /* Amnezia Tunnel.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		C3DC4E642F8B1F030056A4E5 /* Packet Tunnel */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = C3DC4E722F8B1F040056A4E5 /* Build configuration list for PBXNativeTarget "Packet Tunnel" */;
@@ -153,7 +212,6 @@
 			packageProductDependencies = (
 				C3F8A5E32F8B7953008A4180 /* WireGuardKit */,
 				C3F8A5E82F8C7B4A008A4180 /* OpenVPNAdapter */,
-				C3F2068230031574008E13BF /* AmneziaWGKit */,
 			);
 			productName = "Packet Tunnel";
 			productReference = C3DC4E652F8B1F030056A4E5 /* Packet Tunnel.appex */;
@@ -172,6 +230,7 @@
 			);
 			dependencies = (
 				C3F8A5E12F8B78C8008A4180 /* PBXTargetDependency */,
+				18E58E4F3065F81D008D9C00 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C3F27A562F889F05005BFB60 /* Free VPN */,
@@ -190,9 +249,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2640;
+				LastSwiftUpdateCheck = 2700;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
+					18E58E483065F81D008D9C00 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 					C3DC4E642F8B1F030056A4E5 = {
 						CreatedOnToolsVersion = 26.4;
 					};
@@ -223,11 +285,19 @@
 			targets = (
 				C3F27A532F889F05005BFB60 /* Free VPN */,
 				C3DC4E642F8B1F030056A4E5 /* Packet Tunnel */,
+				18E58E483065F81D008D9C00 /* Amnezia Tunnel */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		18E58E473065F81D008D9C00 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C3DC4E632F8B1F030056A4E5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -245,6 +315,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		18E58E453065F81D008D9C00 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C3DC4E612F8B1F030056A4E5 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -262,6 +339,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		18E58E4F3065F81D008D9C00 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 18E58E483065F81D008D9C00 /* Amnezia Tunnel */;
+			targetProxy = 18E58E4E3065F81D008D9C00 /* PBXContainerItemProxy */;
+		};
 		C3F8A5E12F8B78C8008A4180 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = C3DC4E642F8B1F030056A4E5 /* Packet Tunnel */;
@@ -270,6 +352,86 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		18E58E523065F81D008D9C00 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Amnezia Tunnel/Amnezia_Tunnel.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1.7;
+				DEVELOPMENT_TEAM = X7H42T48K5;
+				ENABLE_APP_SANDBOX = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Amnezia Tunnel/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Amnezia Tunnel";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.7;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn.AmneziaTunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Debug;
+		};
+		18E58E533065F81D008D9C00 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Amnezia Tunnel/Amnezia_Tunnel.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1.7;
+				DEVELOPMENT_TEAM = X7H42T48K5;
+				ENABLE_APP_SANDBOX = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Amnezia Tunnel/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Amnezia Tunnel";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.7;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn.AmneziaTunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Release;
+		};
 		C3DC4E732F8B1F040056A4E5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -521,6 +683,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		18E58E553065F81D008D9C00 /* Build configuration list for PBXNativeTarget "Amnezia Tunnel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				18E58E523065F81D008D9C00 /* Debug */,
+				18E58E533065F81D008D9C00 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		C3DC4E722F8B1F040056A4E5 /* Build configuration list for PBXNativeTarget "Packet Tunnel" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

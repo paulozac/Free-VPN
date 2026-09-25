@@ -150,7 +150,7 @@ final class ProfileServer {
         let isWireGuardFamily = lower.contains("[interface]") && lower.contains("[peer]") && lower.contains("privatekey")
         let hasClient = lower.components(separatedBy: .newlines).contains { $0.trimmingCharacters(in: .whitespaces) == "client" }
         let isOpenVPN = !isWireGuardFamily && (lower.contains("remote ") || lower.contains("<ca>") || hasClient)
-        let awgKeys = ["jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"]
+        let awgKeys = AmneziaWGKeys.interfaceKeys
         let isAmneziaWG = isWireGuardFamily && configValue.components(separatedBy: .newlines).contains { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces).lowercased()
             return awgKeys.contains { key in
@@ -370,7 +370,7 @@ final class ProfileServer {
     function detectProtocol(c){
       const l=c.toLowerCase();
       if(l.includes('[interface]')&&l.includes('[peer]')&&l.includes('privatekey')){
-        if(/^(jc|jmin|jmax|s1|s2|h[1-4])\\s*=/im.test(c))return'amneziawg';
+        if(/^(jc|jmin|jmax|s[1-4]|h[1-4]|i[1-5]|headerprotectionkey|contentpaddingaddition|rekeyaftertime|rekeytimeout|rejectaftertime|keepalivetimeout|maxhandshakeattempts|randomtrailers|disablecookies)\\s*=/im.test(c))return'amneziawg';
         return'wireguard';
       }
       if(l.includes('remote ')||l.includes('<ca>')||/^client\\s*$/m.test(l))return'openvpn';

@@ -7,6 +7,23 @@
 
 import Foundation
 
+/// AmneziaWG-specific `[Interface]` keys, lowercased. A WireGuard config carrying
+/// any of these is an AmneziaWG config. Covers AWG 1.5 (Jc/Jmin/Jmax, S1-S2),
+/// 2.0 (S3-S4, H1-H4 ranges, I1-I5) and 3.1 (header protection, content padding,
+/// randomized timers, trailer/cookie toggles).
+enum AmneziaWGKeys {
+    nonisolated static let interfaceKeys: [String] = [
+        "jc", "jmin", "jmax",
+        "s1", "s2", "s3", "s4",
+        "h1", "h2", "h3", "h4",
+        "i1", "i2", "i3", "i4", "i5",
+        "headerprotectionkey", "contentpaddingaddition",
+        "rekeyaftertime", "rekeytimeout", "rejectaftertime",
+        "keepalivetimeout", "maxhandshakeattempts",
+        "randomtrailers", "disablecookies"
+    ]
+}
+
 enum VPNProtocolType: String, Codable, Sendable {
     case wireGuard
     case openVPN
@@ -34,8 +51,8 @@ enum VPNProtocolType: String, Codable, Sendable {
 
         // WireGuard family: has [Interface] + [Peer] with PrivateKey
         if lower.contains("[interface]") && lower.contains("[peer]") && lower.contains("privatekey") {
-            // AmneziaWG: WireGuard + obfuscation params (Jc, Jmin, Jmax, S1, S2, H1-H4)
-            let awgKeys = ["jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"]
+            // AmneziaWG: WireGuard + obfuscation params
+            let awgKeys = AmneziaWGKeys.interfaceKeys
             let hasAWGParams = configString.components(separatedBy: .newlines).contains { line in
                 let trimmed = line.trimmingCharacters(in: .whitespaces).lowercased()
                 return awgKeys.contains { key in

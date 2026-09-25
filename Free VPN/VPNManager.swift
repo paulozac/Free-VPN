@@ -58,7 +58,18 @@ final class VPNManager {
     private var logPollingTask: Task<Void, Never>?
     private var lastTunnelLogCount = 0
 
-    private let tunnelBundleIdentifier = "com.zacvpn.zacvpn.PacketTunnel"
+    // WireGuard/OpenVPN and AmneziaWG run in separate extension processes so the
+    // two Go libraries never share a binary (and an AmneziaWG regression can't
+    // reach WireGuard users).
+    private static let packetTunnelBundleIdentifier = "com.zacvpn.zacvpn.PacketTunnel"
+    private static let amneziaTunnelBundleIdentifier = "com.zacvpn.zacvpn.AmneziaTunnel"
+    private static let knownTunnelBundleIdentifiers: Set<String> = [
+        packetTunnelBundleIdentifier, amneziaTunnelBundleIdentifier
+    ]
+
+    private static func tunnelBundleIdentifier(for protocolType: VPNProtocolType) -> String {
+        protocolType == .amneziaWG ? amneziaTunnelBundleIdentifier : packetTunnelBundleIdentifier
+    }
 
     // MARK: - Tunnel Extension Log Fetching
 
@@ -220,6 +231,7 @@ final class VPNManager {
         ]
 
         await saveTunnelConfiguration(
+            protocolType: .wireGuard,
             serverAddress: config.peers.first?.endpoint ?? "Unknown",
             providerConfig: providerConfig
         )
@@ -245,6 +257,7 @@ final class VPNManager {
         ]
 
         await saveTunnelConfiguration(
+            protocolType: .amneziaWG,
             serverAddress: config?.peers.first?.endpoint ?? "Unknown",
             providerConfig: providerConfig
         )
@@ -263,6 +276,7 @@ final class VPNManager {
         ]
 
         await saveTunnelConfiguration(
+            protocolType: .openVPN,
             serverAddress: endpoint ?? "Unknown",
             providerConfig: providerConfig,
             username: username,
@@ -281,7 +295,7 @@ final class VPNManager {
                 if let proto = manager.protocolConfiguration as? NETunnelProviderProtocol {
                     log.info("Existing manager bundle ID: \(proto.providerBundleIdentifier ?? "nil")")
 
-                    if proto.providerBundleIdentifier != tunnelBundleIdentifier {
+                    if !Self.knownTunnelBundleIdentifiers.contains(proto.providerBundleIdentifier ?? "") {
                         log.info("Removing stale VPN config with old bundle ID")
                         try? await manager.removeFromPreferences()
                         continue
@@ -300,11 +314,11 @@ final class VPNManager {
         }
     }
 
-    private func saveTunnelConfiguration(serverAddress: String, providerConfig: [String: Any], username: String? = nil, password: String? = nil) async {
+    private func saveTunnelConfiguration(protocolType: VPNProtocolType, serverAddress: String, providerConfig: [String: Any], username: String? = nil, password: String? = nil) async {
         let manager = tunnelManager ?? NETunnelProviderManager()
 
         let protocolConfig = NETunnelProviderProtocol()
-        protocolConfig.providerBundleIdentifier = tunnelBundleIdentifier
+        protocolConfig.providerBundleIdentifier = Self.tunnelBundleIdentifier(for: protocolType)
         protocolConfig.serverAddress = serverAddress
         protocolConfig.providerConfiguration = providerConfig
 
