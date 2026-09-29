@@ -96,9 +96,11 @@ class PacketTunnelSettingsGenerator {
         if let initPacketData5 = tunnelConfiguration.interface.initPacketData5 {
             wgSettings.append("i5=\(initPacketData5)\n")
         }
-        // AWG 3.1 device parameters
+        // AWG 3.1 device parameters. Like private_key, the UAPI takes the header
+        // protection key as hex while configs carry it as base64, and the toggles
+        // go through strconv.ParseBool, which rejects the config's "on"/"off".
         if let headerProtectionKey = tunnelConfiguration.interface.headerProtectionKey {
-            wgSettings.append("header_protection_key=\(headerProtectionKey)\n")
+            wgSettings.append("header_protection_key=\(Self.uapiHexKey(headerProtectionKey))\n")
         }
         if let contentPaddingAddition = tunnelConfiguration.interface.contentPaddingAddition {
             wgSettings.append("content_padding_addition=\(contentPaddingAddition)\n")
@@ -119,10 +121,10 @@ class PacketTunnelSettingsGenerator {
             wgSettings.append("max_handshake_attempts=\(maxHandshakeAttempts)\n")
         }
         if let randomTrailers = tunnelConfiguration.interface.randomTrailers {
-            wgSettings.append("random_trailers=\(randomTrailers)\n")
+            wgSettings.append("random_trailers=\(Self.uapiBool(randomTrailers))\n")
         }
         if let disableCookies = tunnelConfiguration.interface.disableCookies {
-            wgSettings.append("disable_cookies=\(disableCookies)\n")
+            wgSettings.append("disable_cookies=\(Self.uapiBool(disableCookies))\n")
         }
         if !tunnelConfiguration.peers.isEmpty {
             wgSettings.append("replace_peers=true\n")
@@ -279,6 +281,22 @@ class PacketTunnelSettingsGenerator {
         }
 
         return (ipv4ExcludedRoutes, ipv6ExcludedRoutes)
+    }
+
+    /// Converts a base64 32-byte key to the hex form the UAPI expects. Values that
+    /// are already hex (or not decodable) pass through so Go reports the error.
+    private static func uapiHexKey(_ value: String) -> String {
+        guard let data = Data(base64Encoded: value), data.count == 32 else { return value }
+        return data.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Maps wg-quick style toggles (on/off, yes/no) to Go's ParseBool vocabulary.
+    private static func uapiBool(_ value: String) -> String {
+        switch value.lowercased() {
+        case "on", "yes", "true", "1": return "true"
+        case "off", "no", "false", "0": return "false"
+        default: return value
+        }
     }
 
     private class func reresolveEndpoint(endpoint: Endpoint) -> EndpointResolutionResult {

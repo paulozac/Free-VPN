@@ -244,11 +244,29 @@ extension TunnelConfiguration {
             peer.endpoint = endpoint
         }
         if let persistentKeepAliveString = attributes["persistentkeepalive"] {
-            guard let persistentKeepAlive = UInt16(persistentKeepAliveString) else {
+            guard let persistentKeepAlive = parseKeepAlive(persistentKeepAliveString) else {
                 throw ParseError.peerHasInvalidPersistentKeepAlive(persistentKeepAliveString)
             }
             peer.persistentKeepAlive = persistentKeepAlive
         }
         return peer
+    }
+
+    /// Parses PersistentKeepalive as a single value ("25") or an AWG-style
+    /// randomized range ("25-35"). The Go UAPI only accepts a single integer,
+    /// so a range is resolved to a random value within it at parse time.
+    private static func parseKeepAlive(_ string: String) -> UInt16? {
+        if let value = UInt16(string) {
+            return value
+        }
+        let bounds = string.split(separator: "-", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard bounds.count == 2,
+              let lower = UInt16(bounds[0]),
+              let upper = UInt16(bounds[1]),
+              lower <= upper else {
+            return nil
+        }
+        return UInt16.random(in: lower...upper)
     }
 }
