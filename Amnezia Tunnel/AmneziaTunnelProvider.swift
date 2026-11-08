@@ -123,6 +123,19 @@ class AmneziaTunnelProvider: NEPacketTunnelProvider {
         return logQueue.sync { try? JSONEncoder().encode(tunnelLog) }
     }
 
+    /// AmneziaWGKit applies routes through this method, so local network
+    /// exclusions are added here without modifying the library.
+    override func setTunnelNetworkSettings(_ tunnelNetworkSettings: NETunnelNetworkSettings?, completionHandler: ((Error?) -> Void)? = nil) {
+        if let settings = tunnelNetworkSettings as? NEPacketTunnelNetworkSettings {
+            if LocalNetworkExclusion.isEnabled {
+                LocalNetworkExclusion.apply(to: settings).forEach(appendTunnelLog)
+            } else {
+                appendTunnelLog("Local network: exclusion off, all traffic tunneled")
+            }
+        }
+        super.setTunnelNetworkSettings(tunnelNetworkSettings, completionHandler: completionHandler)
+    }
+
     // MARK: - Diagnostics
 
     private func logInterface(_ tunnelConfig: AmneziaWGKit.TunnelConfiguration) {

@@ -101,6 +101,19 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         return logQueue.sync { try? JSONEncoder().encode(tunnelLog) }
     }
 
+    /// Both WireGuardKit and the OpenVPN delegate apply routes through this method,
+    /// so local network exclusions are added here without modifying either library.
+    override func setTunnelNetworkSettings(_ tunnelNetworkSettings: NETunnelNetworkSettings?, completionHandler: ((Error?) -> Void)? = nil) {
+        if let settings = tunnelNetworkSettings as? NEPacketTunnelNetworkSettings {
+            if LocalNetworkExclusion.isEnabled {
+                LocalNetworkExclusion.apply(to: settings).forEach(appendTunnelLog)
+            } else {
+                appendTunnelLog("Local network: exclusion off, all traffic tunneled")
+            }
+        }
+        super.setTunnelNetworkSettings(tunnelNetworkSettings, completionHandler: completionHandler)
+    }
+
     /// Resolves a persistent Keychain reference to retrieve the stored password.
     private static func loadPasswordFromKeychain(_ persistentRef: Data?) -> String? {
         let log = Logger(subsystem: "com.zacvpn.zacvpn.PacketTunnel", category: "Keychain")

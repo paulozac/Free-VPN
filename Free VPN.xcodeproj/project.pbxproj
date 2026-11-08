@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		18E5AA013065F900008D9C01 /* AmneziaWGKit in Frameworks */ = {isa = PBXBuildFile; productRef = C3F2068230031574008E13BF /* AmneziaWGKit */; };
+		18E5AA023065F900008D9C02 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */; };
+		18E5AA033065F900008D9C03 /* Amnezia Tunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 18E58E493065F81D008D9C00 /* Amnezia Tunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C38F5FC62F8B2A0A00914D72 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */; };
 		C38F5FCB2F8B2B2500914D72 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */; };
 		C3F8A5DF2F8B78C8008A4180 /* Packet Tunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C3DC4E652F8B1F030056A4E5 /* Packet Tunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -14,9 +17,6 @@
 		C3F8A5E92F8C7B4A008A4180 /* OpenVPNAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = C3F8A5E82F8C7B4A008A4180 /* OpenVPNAdapter */; };
 		C3F8A5EB2F8C7BC9008A4180 /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3F8A5EA2F8C7BC9008A4180 /* SystemConfiguration.framework */; };
 		C3F8A5ED2F8C7BDD008A4180 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3F8A5EC2F8C7BDD008A4180 /* UIKit.framework */; };
-		18E5AA013065F900008D9C01 /* AmneziaWGKit in Frameworks */ = {isa = PBXBuildFile; productRef = C3F2068230031574008E13BF /* AmneziaWGKit */; };
-		18E5AA023065F900008D9C02 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3DC4E672F8B1F030056A4E5 /* NetworkExtension.framework */; };
-		18E5AA033065F900008D9C03 /* Amnezia Tunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 18E58E493065F81D008D9C00 /* Amnezia Tunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -437,7 +437,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = "Packet Tunnel/Packet_Tunnel.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.7;
+				CURRENT_PROJECT_VERSION = 1.8;
 				DEVELOPMENT_TEAM = X7H42T48K5;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Packet Tunnel/Info.plist";
@@ -448,7 +448,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn.PacketTunnel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -466,7 +466,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = "Packet Tunnel/Packet_Tunnel.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.7;
+				CURRENT_PROJECT_VERSION = 1.8;
 				DEVELOPMENT_TEAM = X7H42T48K5;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Packet Tunnel/Info.plist";
@@ -477,7 +477,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn.PacketTunnel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -634,7 +634,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -667,7 +667,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zacvpn.zacvpn;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

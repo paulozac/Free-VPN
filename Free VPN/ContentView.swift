@@ -14,6 +14,73 @@ private enum Theme {
     static let accent = Color(red: 0.13, green: 0.69, blue: 0.34)
 }
 
+/// tvOS button style that makes the focused control unmistakable: the focused
+/// button becomes a white, lifted card with dark content, while unfocused buttons
+/// stay subtle. "Active" (e.g. the connected profile) is shown with an accent
+/// outline rather than a solid fill so it is never confused with focus.
+private struct FocusCardButtonStyle: ButtonStyle {
+    var isActive = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        FocusCard(configuration: configuration, isActive: isActive)
+    }
+
+    private struct FocusCard: View {
+        let configuration: Configuration
+        let isActive: Bool
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+            configuration.label
+                .foregroundStyle(isFocused ? Color.black : Color.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 14)
+                .background {
+                    shape.fill(isFocused ? Color.white : isActive ? Theme.accent.opacity(0.18) : Color.white.opacity(0.08))
+                }
+                .overlay {
+                    if isActive {
+                        shape.strokeBorder(Theme.accent, lineWidth: isFocused ? 4 : 2)
+                    }
+                }
+                .shadow(color: .black.opacity(isFocused ? 0.5 : 0), radius: 10, y: 6)
+                .scaleEffect(configuration.isPressed ? 0.97 : isFocused ? 1.04 : 1)
+                .opacity(isEnabled ? 1 : 0.5)
+                .animation(.easeOut(duration: 0.15), value: isFocused)
+                .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+        }
+    }
+}
+
+/// tvOS has no switch control (its toggles show "On"/"Off" text), so this draws
+/// a label with a trailing switch inside the app's focus card.
+private struct SwitchCardToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            HStack(spacing: 16) {
+                configuration.label
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Capsule()
+                    .fill(configuration.isOn ? Theme.accent : Color.gray.opacity(0.5))
+                    .frame(width: 64, height: 36)
+                    .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                        Circle()
+                            .fill(.white)
+                            .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                            .padding(3)
+                    }
+                    .animation(.easeInOut(duration: 0.2), value: configuration.isOn)
+            }
+        }
+        .buttonStyle(FocusCardButtonStyle())
+        .accessibilityValue(configuration.isOn ? "On" : "Off")
+    }
+}
+
 private struct ScrollContentHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
@@ -45,6 +112,9 @@ struct ContentView: View {
     @State private var uploadProgress: Double = 0
     @State private var uploadedProfileID: UUID?
     @FocusState private var focusedLogIndex: Int?
+    /// Read by the tunnel extensions when they apply routes; stored in the app group.
+    @AppStorage("excludeLocalNetworks", store: UserDefaults(suiteName: "group.com.zacvpn.zacvpn"))
+    private var excludeLocalNetworks = true
 
     var body: some View {
         NavigationStack {
@@ -117,53 +187,10 @@ struct ContentView: View {
                                 }
                             }
 
-                            // Speed Test Results (3-column)
-                            if speedTest.state != .idle {
-                                VStack(spacing: 6) {
-                                    if speedTest.isRunning {
-                                        ProgressView(value: speedTest.progress)
-                                            .tint(Theme.accent)
-                                        Text(speedTestPhaseText)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
+                            speedTestCard
+                                .padding(.top, 12)
 
-                                    HStack(alignment: .top, spacing: 12) {
-                                        speedTestCompactRow("Latency", icon: "clock.fill", color: .cyan,
-                                                            primary: speedTest.minLatencyMs, average: speedTest.latencyMs,
-                                                            unit: "ms", decimals: 0)
-                                        speedTestCompactRow("Download", icon: "arrow.down.circle.fill", color: .blue,
-                                                            primary: speedTest.peakDownloadMbps, average: speedTest.downloadMbps,
-                                                            unit: "Mbps", decimals: 1)
-                                        speedTestCompactRow("Upload", icon: "arrow.up.circle.fill", color: .purple,
-                                                            primary: speedTest.peakUploadMbps, average: speedTest.uploadMbps,
-                                                            unit: "Mbps", decimals: 1)
-                                    }
-
-                                    if case .error(let msg) = speedTest.state {
-                                        Text(msg)
-                                            .font(.caption2)
-                                            .foregroundStyle(.red)
-                                            .lineLimit(1)
-                                    }
-                                }
-                                .padding(.horizontal, 8)
-                            }
-
-                            Button {
-                                if speedTest.isRunning {
-                                    speedTest.cancel()
-                                } else {
-                                    speedTest.startTest()
-                                }
-                            } label: {
-                                Label(speedTest.isRunning ? "Cancel" : "Speed Test", systemImage: speedTest.isRunning ? "xmark.circle" : "speedometer")
-                                    .font(.callout)
-                                    .fontWeight(.semibold)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Theme.accent)
+                            localNetworkCard
 
                         }
                         .padding(.top, 40)
@@ -179,14 +206,16 @@ struct ContentView: View {
                                 .textCase(.uppercase)
 
                             if let image = generateQRCode(from: url) {
-                                let qrSize: CGFloat = speedTest.state != .idle ? 160 : 300
+                                // A third of full size while connected, so the status panels fit without scrolling.
+                                let qrSize: CGFloat = vpnManager.connectionState == .connected ? 100
+                                    : speedTest.state != .idle ? 160 : 300
                                 Image(uiImage: image)
                                     .interpolation(.none)
                                     .resizable()
                                     .scaledToFit()
                                     .frame(width: qrSize, height: qrSize)
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .animation(.easeInOut(duration: 0.3), value: speedTest.state != .idle)
+                                    .animation(.easeInOut(duration: 0.3), value: qrSize)
                             }
 
                             Text(url)
@@ -244,27 +273,27 @@ struct ContentView: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: isActive ? "checkmark.shield.fill" : isTransitioning ? "shield.fill" : "shield")
-                                            .foregroundStyle(isActive ? .white : isTransitioning ? .orange : .secondary)
+                                            .foregroundStyle(isActive ? Theme.accent : isTransitioning ? .orange : .secondary)
                                             .symbolEffect(.pulse, isActive: isTransitioning)
 
                                         VStack(alignment: .leading) {
                                             HStack(spacing: 6) {
                                                 Text(profile.name)
                                                     .font(.body)
-                                                    .foregroundStyle(isActive ? .white : .secondary)
+                                                    .foregroundStyle(.primary)
                                                 Text(profile.vpnProtocol.shortName)
                                                     .font(.caption2)
                                                     .fontWeight(.semibold)
                                                     .padding(.horizontal, 6)
                                                     .padding(.vertical, 2)
-                                                    .background(isActive ? Color.white.opacity(0.25) : protocolBadgeColor(profile.vpnProtocol).opacity(0.2))
-                                                    .foregroundStyle(isActive ? .white : protocolBadgeColor(profile.vpnProtocol))
+                                                    .background(protocolBadgeColor(profile.vpnProtocol).opacity(0.2))
+                                                    .foregroundStyle(protocolBadgeColor(profile.vpnProtocol))
                                                     .clipShape(Capsule())
                                             }
                                             if isActive {
                                                 Text("Click to disconnect")
                                                     .font(.caption)
-                                                    .foregroundStyle(.white.opacity(0.8))
+                                                    .foregroundStyle(.secondary)
                                             } else if let endpoint = profile.endpoint {
                                                 Text(endpoint)
                                                     .font(.caption)
@@ -278,20 +307,13 @@ struct ContentView: View {
                                             Text("ACTIVE")
                                                 .font(.caption2)
                                                 .fontWeight(.bold)
-                                                .foregroundStyle(.white)
+                                                .foregroundStyle(Theme.accent)
                                         } else if isTransitioning {
                                             ProgressView()
                                         }
                                     }
-                                    .padding(.horizontal)
-                                    .padding(.vertical, 4)
-                                    .background {
-                                        if isActive {
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(Theme.accent)
-                                        }
-                                    }
                                 }
+                                .buttonStyle(FocusCardButtonStyle(isActive: isActive))
                                 .disabled(vpnManager.connectionState == .disconnecting)
                                 .focused($focusedProfileID, equals: profile.id)
                                 .prefersDefaultFocus(profile.id == defaultFocusProfileID, in: focusNamespace)
@@ -324,6 +346,9 @@ struct ContentView: View {
                                 }
                             }
                         }
+                        // Room for the focused card's scale-up and shadow; the ScrollView clips its bounds.
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 16)
                         .background(
                             GeometryReader { proxy in
                                 Color.clear.preference(key: ScrollContentHeightKey.self, value: proxy.size.height)
@@ -554,11 +579,13 @@ struct ContentView: View {
             }
             .onAppear {
                 startServer()
+                focusLastActiveProfile()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     showingLogs = false
                     startServer()
+                    focusLastActiveProfile()
                 } else {
                     profileServer.stop()
                 }
@@ -627,11 +654,23 @@ struct ContentView: View {
         return true
     }
 
+    /// The last profile the user connected to (persisted by ProfileStore). Don't gate this on
+    /// the VPN state: that loads asynchronously and is still `.invalid` at launch.
     private var defaultFocusProfileID: UUID? {
-        if vpnManager.isActiveOrTransitioning, let selectedID = profileStore.selectedProfileID {
+        if let selectedID = profileStore.selectedProfileID,
+           profileStore.profiles.contains(where: { $0.id == selectedID }) {
             return selectedID
         }
         return profileStore.profiles.first?.id
+    }
+
+    /// `prefersDefaultFocus` only applies to the very first focus pass, so also set focus
+    /// explicitly after launch and when returning to the foreground.
+    private func focusLastActiveProfile() {
+        Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            focusedProfileID = defaultFocusProfileID
+        }
     }
 
     private func isProfileActive(_ profile: SavedProfile) -> Bool {
@@ -663,26 +702,179 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
-    private func speedTestCompactRow(_ label: String, icon: String, color: Color,
-                                     primary: Double?, average: Double?,
-                                     unit: String, decimals: Int) -> some View {
-        if let value = primary {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Image(systemName: icon)
-                        .foregroundStyle(color)
-                    Text(label)
-                        .foregroundStyle(.secondary)
-                }
-                Text(String(format: "%.\(decimals)f \(unit)", value))
+    // MARK: - Local Network
+
+    /// Lets smart home hubs (Matter, Thread, HomeKit) and other local devices keep
+    /// working while the VPN is on. Routes are fixed when the tunnel starts, so a
+    /// change reconnects the active profile.
+    private var localNetworkCard: some View {
+        VStack(spacing: 8) {
+            Toggle(isOn: $excludeLocalNetworks) {
+                Label("Bypass VPN for Smart Home and Local Network", systemImage: "homekit")
+                    .font(.caption)
                     .fontWeight(.semibold)
-                if let avg = average {
-                    Text(String(format: "avg %.\(decimals)f", avg))
+                    // Stay on one line in the narrow status pane; shrink further if needed.
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+            .toggleStyle(SwitchCardToggleStyle())
+            Text(excludeLocalNetworks
+                 ? "Home devices stay reachable; internet traffic uses the VPN"
+                 : "All traffic, including home devices, goes through the VPN")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(20)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.white.opacity(0.05)))
+        .onChange(of: excludeLocalNetworks) {
+            guard vpnManager.isActiveOrTransitioning,
+                  let profile = profileStore.profiles.first(where: { $0.id == profileStore.selectedProfileID }) else { return }
+            speedTest.reset()
+            connectToProfile(profile)
+        }
+    }
+
+    // MARK: - Speed Test
+
+    /// Self-contained speed test panel: a header that says *what* is being measured
+    /// (through the VPN or the direct connection), one tile per metric that shows
+    /// pending / measuring / done, and a single action button whose label always
+    /// describes what pressing it will do.
+    private var speedTestCard: some View {
+        VStack(spacing: 14) {
+            VStack(spacing: 2) {
+                Label("Speed Test", systemImage: "speedometer")
+                    .font(.headline)
+                Text(speedTestContextText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+
+            if speedTest.state != .idle {
+                HStack(spacing: 12) {
+                    speedTestTile("Ping", icon: "clock.fill", color: .cyan,
+                                  value: speedTest.minLatencyMs, average: speedTest.latencyMs,
+                                  unit: "ms", decimals: 0,
+                                  isMeasuring: speedTest.state == .testingLatency)
+                    speedTestTile("Download", icon: "arrow.down.circle.fill", color: .blue,
+                                  value: speedTest.peakDownloadMbps, average: speedTest.downloadMbps,
+                                  unit: "Mbps", decimals: 1,
+                                  isMeasuring: speedTest.state == .testingDownload)
+                    speedTestTile("Upload", icon: "arrow.up.circle.fill", color: .purple,
+                                  value: speedTest.peakUploadMbps, average: speedTest.uploadMbps,
+                                  unit: "Mbps", decimals: 1,
+                                  isMeasuring: speedTest.state == .testingUpload)
+                }
+
+                if speedTest.isRunning {
+                    ProgressView(value: speedTest.progress)
+                        .tint(Theme.accent)
+                }
+
+                if case .error(let msg) = speedTest.state {
+                    Label(msg, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                }
+            }
+
+            Button {
+                if speedTest.isRunning {
+                    speedTest.cancel()
+                } else {
+                    speedTest.startTest()
+                }
+            } label: {
+                Label(speedTestButtonTitle, systemImage: speedTestButtonIcon)
+                    .font(.callout)
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(FocusCardButtonStyle())
+        }
+        // Inner padding leaves room for the focused button's scale-up so it isn't clipped.
+        .padding(20)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.white.opacity(0.05)))
+        .animation(.easeInOut(duration: 0.25), value: speedTest.state)
+    }
+
+    private func speedTestTile(_ title: String, icon: String, color: Color,
+                               value: Double?, average: Double?,
+                               unit: String, decimals: Int,
+                               isMeasuring: Bool) -> some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .foregroundStyle(color)
+                Text(title)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption2)
+
+            Group {
+                if let value {
+                    Text(value, format: .number.precision(.fractionLength(decimals)))
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .monospacedDigit()
+                } else if isMeasuring {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                } else {
+                    Text("—")
+                        .font(.title3)
                         .foregroundStyle(.tertiary)
                 }
             }
-            .font(.caption2)
+            .frame(height: 44)
+
+            Text(unit)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            // Reserve the line even when empty so tiles don't jump in height.
+            Text(average.map { "avg " + $0.formatted(.number.precision(.fractionLength(decimals))) } ?? " ")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(isMeasuring ? 0.1 : 0.05)))
+        .overlay {
+            if isMeasuring {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(color, lineWidth: 2)
+            }
+        }
+    }
+
+    private var speedTestContextText: String {
+        if speedTest.isRunning { return speedTestPhaseText }
+        if vpnManager.connectionState == .connected,
+           let profile = profileStore.profiles.first(where: { $0.id == profileStore.selectedProfileID }) {
+            return "Through VPN \u{2022} \(profile.name)"
+        }
+        return "Without VPN \u{2022} direct connection"
+    }
+
+    private var speedTestButtonTitle: String {
+        switch speedTest.state {
+        case .idle: "Run Speed Test"
+        case .testingLatency, .testingDownload, .testingUpload: "Stop Test"
+        case .done, .error: "Test Again"
+        }
+    }
+
+    private var speedTestButtonIcon: String {
+        switch speedTest.state {
+        case .idle: "play.fill"
+        case .testingLatency, .testingDownload, .testingUpload: "stop.fill"
+        case .done, .error: "arrow.clockwise"
         }
     }
 
@@ -716,9 +908,9 @@ struct ContentView: View {
 
     private var speedTestPhaseText: String {
         switch speedTest.state {
-        case .testingLatency: "Measuring latency..."
-        case .testingDownload: "Testing download speed..."
-        case .testingUpload: "Testing upload speed..."
+        case .testingLatency: "Step 1 of 3 \u{2022} Measuring ping…"
+        case .testingDownload: "Step 2 of 3 \u{2022} Testing download…"
+        case .testingUpload: "Step 3 of 3 \u{2022} Testing upload…"
         default: ""
         }
     }
